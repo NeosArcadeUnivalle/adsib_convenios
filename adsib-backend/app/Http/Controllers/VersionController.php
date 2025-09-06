@@ -6,6 +6,7 @@ use App\Models\Convenio;
 use App\Models\Comparacion;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use App\Http\Requests\VersionStoreRequest;
 use Illuminate\Support\Str;
 
 class VersionController extends Controller
@@ -111,23 +112,21 @@ class VersionController extends Controller
         return response()->json($v, 200, [], JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE);
     }
 
-    // Crear versión + comparación con la anterior
-    public function store(Request $r, $convenioId) {
+    // Crear versión + comparación con la anterior (usa FormRequest)
+    public function store(VersionStoreRequest $r, $convenioId) {
+        $data = $r->validated(); // <-- reglas en VersionStoreRequest
         $c = Convenio::findOrFail($convenioId);
-        $r->validate([
-            'observaciones' => 'nullable|string',
-            'archivo'       => 'required|file|mimes:pdf,docx|max:20480',
-        ]);
 
         $next = (int) VersionConvenio::where('convenio_id',$c->id)->max('numero_version') + 1;
         $path = $this->saveFilePath($c->id, $next, $r->file('archivo'));
+
         $version = VersionConvenio::create([
             'convenio_id'             => $c->id,
             'numero_version'          => $next,
             'archivo_nombre_original' => $this->toUtf8($r->file('archivo')->getClientOriginalName()),
             'archivo_path'            => $path,
             'fecha_version'           => now(),
-            'observaciones'           => $this->toUtf8($r->input('observaciones')),
+            'observaciones'           => $this->toUtf8($data['observaciones'] ?? null),
             'created_at'              => now(),
         ]);
 

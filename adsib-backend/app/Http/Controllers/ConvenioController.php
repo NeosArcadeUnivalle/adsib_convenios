@@ -1,10 +1,14 @@
 <?php
+
 namespace App\Http\Controllers;
 
 use App\Models\Convenio;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+// 👇 importa las FormRequest
+use App\Http\Requests\ConvenioStoreRequest;
+use App\Http\Requests\ConvenioUpdateRequest;
 
 class ConvenioController extends Controller
 {
@@ -15,6 +19,7 @@ class ConvenioController extends Controller
         $out = iconv($enc, 'UTF-8//IGNORE', $s);
         return $out === false ? '' : $out;
     }
+
     private function saveFile(Convenio $c, \Illuminate\Http\UploadedFile $file): void {
         // nombre seguro para guardar
         $nameOrig = $this->toUtf8($file->getClientOriginalName());
@@ -64,16 +69,10 @@ class ConvenioController extends Controller
         return response()->json($q->paginate($per));
     }
 
-    public function store(Request $r)
+    // 👉 ahora usa ConvenioStoreRequest
+    public function store(ConvenioStoreRequest $r)
     {
-        $data = $r->validate([
-            'titulo'            => 'required|string|max:200',
-            'descripcion'       => 'nullable|string',
-            'fecha_firma'       => 'nullable|date',
-            'fecha_vencimiento' => 'nullable|date|after_or_equal:fecha_firma',
-            'creado_por'        => 'nullable|integer',
-            'archivo'           => 'nullable|file|mimes:pdf,docx|max:20480', // 20MB
-        ]);
+        $data = $r->validated();
 
         $c = Convenio::create($data);
 
@@ -84,25 +83,24 @@ class ConvenioController extends Controller
         return response()->json($c, 201, [], JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE);
     }
 
-    public function show($id)    { return response()->json(Convenio::findOrFail($id)); }
+    public function show($id)
+    {
+        return response()->json(Convenio::findOrFail($id));
+    }
 
-    public function update(Request $r, $id)
+    // 👉 ahora usa ConvenioUpdateRequest
+    public function update(ConvenioUpdateRequest $r, $id)
     {
         $c = Convenio::findOrFail($id);
-        $data = $r->validate([
-            'titulo'            => 'sometimes|required|string|max:200',
-            'descripcion'       => 'nullable|string',
-            'fecha_firma'       => 'nullable|date',
-            'fecha_vencimiento' => 'nullable|date|after_or_equal:fecha_firma',
-            'creado_por'        => 'nullable|integer',
-            'archivo'           => 'nullable|file|mimes:pdf,docx|max:20480',
-        ]);
+        $data = $r->validated();
 
         $c->update($data);
+
         if ($r->hasFile('archivo')) {
             if ($c->archivo_path) Storage::delete($c->archivo_path); // reemplazo
             $this->saveFile($c, $r->file('archivo'));
         }
+
         return response()->json($c, 200, [], JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE);
     }
 

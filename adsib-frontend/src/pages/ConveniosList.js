@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import api from "../api";
+import api, { clearToken } from "../api";
 
 /* ==== helpers (fuera del componente para evitar warnings) ==== */
 const isoToday = () => {
@@ -32,7 +32,6 @@ const BadgeVence = ({ date }) => {
   return <span style={{ padding: "2px 6px", borderRadius: 6, background: bg }}>{txt}</span>;
 };
 
-/* ===================== Componente ===================== */
 export default function ConveniosList() {
   const [rows, setRows] = useState([]);
   const [meta, setMeta] = useState({ last_page: 1 });
@@ -68,7 +67,7 @@ export default function ConveniosList() {
     let active = true;
     api.get(`/convenios?${qs}`).then((r) => {
       if (!active) return;
-      setRows(r.data.data);
+      setRows(r.data.data || []);
       setMeta({ last_page: r.data.last_page || 1 });
     }).catch((e)=>console.error(e.response?.data || e.message));
     return () => { active = false; };
@@ -105,13 +104,21 @@ export default function ConveniosList() {
       per_page: 10,
     }));
 
+  // (opcional) logout rápido
+  const logout = async () => {
+    try { await api.post("/auth/logout"); } catch {}
+    clearToken();
+    window.location.href = "/login";
+  };
+
   return (
     <div style={{ padding: 16 }}>
       <h2 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         Convenios
-        <Link to="/convenios/nuevo">
-          <button>+ Nuevo</button>
-        </Link>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link to="/convenios/nuevo"><button>+ Nuevo</button></Link>
+          <button onClick={logout}>Salir</button>
+        </div>
       </h2>
 
       {/* Filtros */}
