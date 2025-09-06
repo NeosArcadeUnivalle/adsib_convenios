@@ -3,6 +3,14 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ConvenioController;
+use App\Http\Controllers\VersionController;
+
+/* Versiones de convenio */
+Route::get   ('/convenios/{id}/versiones',  [VersionController::class,'index']);
+Route::post  ('/convenios/{id}/versiones',  [VersionController::class,'store']);
+Route::get   ('/versiones/{vid}/descargar', [VersionController::class,'download']);
+Route::delete('/versiones/{vid}',           [VersionController::class,'destroy']);
+Route::get   ('/versiones/{vid}/texto',     [VersionController::class,'text']);
 
 Route::get('/ping', fn() => response()->json(['ok'=>true]));
 
