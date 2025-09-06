@@ -9,13 +9,13 @@ import api from "../api";
 let tituloAllowedRe;
 let stripNotAllowedRe;
 try {
-  // patrón en string para que el compilador no falle con \p{L}
-  tituloAllowedRe = new RegExp("^[\\p{L}\\p{N}\\s._,:()\\/-]+$", "u");
-  stripNotAllowedRe = new RegExp("[^\\p{L}\\p{N}\\s._,:()\\/-]+", "gu");
+  // 👇 sin escapes innecesarios de "/"
+  tituloAllowedRe = new RegExp("^[\\p{L}\\p{N}\\s._,:()/-]+$", "u");
+  stripNotAllowedRe = new RegExp("[^\\p{L}\\p{N}\\s._,:()/-]+", "gu");
 } catch (e) {
-  // fallback sin \p{…}
-  tituloAllowedRe = /^[A-Za-zÀ-ÿ0-9\s._,:()\/-]+$/;
-  stripNotAllowedRe = /[^A-Za-zÀ-ÿ0-9\s._,:()\/-]+/g;
+  // fallback sin \p{…} (también sin escapes innecesarios de "/")
+  tituloAllowedRe = /^[A-Za-zÀ-ÿ0-9\s._,:()/-]+$/;
+  stripNotAllowedRe = /[^A-Za-zÀ-ÿ0-9\s._,:()/-]+/g;
 }
 
 export default function ConvenioCreate(){
