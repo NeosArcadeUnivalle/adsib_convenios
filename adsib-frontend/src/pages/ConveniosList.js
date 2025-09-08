@@ -177,7 +177,8 @@ export default function ConveniosList() {
         <tbody>
           {rows.map((r) => {
             const d = daysLeft(r.fecha_vencimiento);
-            const resaltado = d === 0 ? "#fee2e2" : undefined; // rojo claro cuando 0d
+            // 🔴 rojo claro cuando 0d o ya vencido
+            const resaltado = (d !== null && d <= 0) ? "#fee2e2" : undefined;
             return (
               <tr key={r.id} style={{ borderTop: "1px solid #eee", background: resaltado }}>
                 <td>{r.titulo}</td>
