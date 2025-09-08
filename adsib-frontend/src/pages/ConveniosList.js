@@ -2,23 +2,20 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import api, { clearToken } from "../api";
 
-/* ==== helpers (fuera del componente para evitar warnings) ==== */
+/* ==== helpers ==== */
 const isoToday = () => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
+  const d = new Date(); d.setHours(0, 0, 0, 0);
   return d.toISOString().slice(0, 10);
 };
 const isoPlusDays = (n) => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
+  const d = new Date(); d.setHours(0, 0, 0, 0);
   d.setDate(d.getDate() + n);
   return d.toISOString().slice(0, 10);
 };
 const daysLeft = (dateStr) => {
   if (!dateStr) return null;
   const end = new Date(dateStr);
-  const t = new Date();
-  t.setHours(0, 0, 0, 0);
+  const t = new Date(); t.setHours(0, 0, 0, 0);
   return Math.floor((end - t) / (1000 * 60 * 60 * 24));
 };
 const BadgeVence = ({ date }) => {
@@ -26,17 +23,21 @@ const BadgeVence = ({ date }) => {
   if (d === null) return <span>—</span>;
   let bg = "#e5e7eb", txt = `${d}d`;
   if (d < 0) { bg = "#fecaca"; txt = `Vencido ${Math.abs(d)}d`; }
+  else if (d === 0) bg = "#fde68a";
   else if (d <= 30) bg = "#fde68a";
   else if (d <= 60) bg = "#fef3c7";
   else bg = "#dcfce7";
   return <span style={{ padding: "2px 6px", borderRadius: 6, background: bg }}>{txt}</span>;
 };
 
+const ESTADOS = ["BORRADOR","NEGOCIACION","VIGENTE","SUSPENDIDO","VENCIDO","RESCINDIDO","CERRADO"];
+
 export default function ConveniosList() {
   const [rows, setRows] = useState([]);
   const [meta, setMeta] = useState({ last_page: 1 });
   const [f, setF] = useState({
     q: "",
+    estado: "",
     fi_from: "",
     fi_to: "",
     fv_from: "",
@@ -48,10 +49,10 @@ export default function ConveniosList() {
     per_page: 10,
   });
 
-  // construir query string según filtros
   const qs = useMemo(() => {
     const p = new URLSearchParams();
     if (f.q) p.set("q", f.q);
+    if (f.estado) p.set("estado", f.estado);
     if (f.fi_from) p.set("fi_from", f.fi_from);
     if (f.fi_to) p.set("fi_to", f.fi_to);
     if (f.fv_from) p.set("fv_from", f.fv_from);
@@ -73,42 +74,35 @@ export default function ConveniosList() {
     return () => { active = false; };
   }, [qs]);
 
-  // toggles y acciones de filtros
   const toggleProx30 = () => {
     setF((s) => {
       const prox30 = !s.prox30;
       if (prox30) {
-        return {
-          ...s,
-          prox30,
-          fv_from: isoToday(),
-          fv_to: isoPlusDays(30),
-          page: 1,
-        };
+        return { ...s, prox30, fv_from: isoToday(), fv_to: isoPlusDays(30), page: 1 };
       }
       return { ...s, prox30, fv_from: "", fv_to: "", page: 1 };
     });
   };
+
   const limpiarFiltros = () =>
     setF((s) => ({
-      ...s,
-      q: "",
-      fi_from: "",
-      fi_to: "",
-      fv_from: "",
-      fv_to: "",
-      prox30: false,
-      page: 1,
-      sort: "fecha_vencimiento",
-      dir: "asc",
-      per_page: 10,
+      ...s, q: "", estado: "", fi_from: "", fi_to: "", fv_from: "", fv_to: "",
+      prox30: false, page: 1, sort: "fecha_vencimiento", dir: "asc", per_page: 10,
     }));
 
-  // (opcional) logout rápido
   const logout = async () => {
     try { await api.post("/auth/logout"); } catch {}
-    clearToken();
-    window.location.href = "/login";
+    clearToken(); window.location.href = "/login";
+  };
+
+  const eliminar = async (id) => {
+    if (!window.confirm("¿Eliminar este convenio? Esta acción no se puede deshacer.")) return;
+    try {
+      await api.delete(`/convenios/${id}`);
+      setRows((x) => x.filter((r) => r.id !== id));
+    } catch (e) {
+      alert(e.response?.data?.message || "No se pudo eliminar.");
+    }
   };
 
   return (
@@ -127,23 +121,28 @@ export default function ConveniosList() {
           placeholder="Buscar por título o descripción..."
           value={f.q}
           onChange={(e) => setF((s) => ({ ...s, q: e.target.value, page: 1 }))}
-          style={{ gridColumn: "span 3" }}
+          style={{ gridColumn: "span 2" }}
         />
+
+        <select value={f.estado} onChange={(e)=>setF(s=>({...s, estado: e.target.value, page:1}))}>
+          <option value="">Todos los estados</option>
+          {ESTADOS.map((e)=> <option key={e} value={e}>{e}</option>)}
+        </select>
+
         <select value={f.sort} onChange={(e) => setF((s) => ({ ...s, sort: e.target.value }))}>
           <option value="fecha_vencimiento">Ordenar por Vencimiento</option>
           <option value="fecha_firma">Ordenar por Firma</option>
           <option value="titulo">Ordenar por Título</option>
           <option value="updated_at">Ordenar por Actualizado</option>
         </select>
+
         <select value={f.dir} onChange={(e) => setF((s) => ({ ...s, dir: e.target.value }))}>
           <option value="asc">Asc</option>
           <option value="desc">Desc</option>
         </select>
+
         <input
-          type="number"
-          min={1}
-          max={100}
-          value={f.per_page}
+          type="number" min={1} max={100} value={f.per_page}
           onChange={(e) => setF((s) => ({ ...s, per_page: +e.target.value || 10, page: 1 }))}
         />
 
@@ -168,6 +167,7 @@ export default function ConveniosList() {
           <tr>
             <th align="left">Título</th>
             <th align="left">Descripción</th>
+            <th>Estado</th>
             <th>Firma</th>
             <th>Vencimiento</th>
             <th>Archivo</th>
@@ -175,31 +175,33 @@ export default function ConveniosList() {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
-              <td>{r.titulo}</td>
-              <td>{r.descripcion?.slice(0, 60) || "—"}</td>
-              <td align="center">{r.fecha_firma || "—"}</td>
-              <td align="center"><BadgeVence date={r.fecha_vencimiento} /></td>
-              <td align="center">{r.archivo_nombre_original ? "Sí" : "—"}</td>
-              <td><Link to={`/convenios/${r.id}`}>Ver</Link></td>
-            </tr>
-          ))}
+          {rows.map((r) => {
+            const d = daysLeft(r.fecha_vencimiento);
+            const resaltado = d === 0 ? "#fee2e2" : undefined; // rojo claro cuando 0d
+            return (
+              <tr key={r.id} style={{ borderTop: "1px solid #eee", background: resaltado }}>
+                <td>{r.titulo}</td>
+                <td>{r.descripcion?.slice(0, 60) || "—"}</td>
+                <td align="center">{r.estado || "—"}</td>
+                <td align="center">{r.fecha_firma || "—"}</td>
+                <td align="center"><BadgeVence date={r.fecha_vencimiento} /></td>
+                <td align="center">{r.archivo_nombre_original ? "Sí" : "—"}</td>
+                <td style={{whiteSpace:"nowrap"}}>
+                  <Link to={`/convenios/${r.id}`}>Ver</Link>{" "}
+                  <Link to={`/convenios/${r.id}/editar`}>Editar</Link>{" "}
+                  <button onClick={() => eliminar(r.id)} style={{marginLeft:4}}>Eliminar</button>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
 
       {/* Paginación */}
       <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
-        <button disabled={f.page <= 1} onClick={() => setF((s) => ({ ...s, page: s.page - 1 }))}>
-          Anterior
-        </button>
+        <button disabled={f.page <= 1} onClick={() => setF((s) => ({ ...s, page: s.page - 1 }))}>Anterior</button>
         <span>Página {f.page} / {meta.last_page}</span>
-        <button
-          disabled={f.page >= meta.last_page}
-          onClick={() => setF((s) => ({ ...s, page: s.page + 1 }))}
-        >
-          Siguiente
-        </button>
+        <button disabled={f.page >= meta.last_page} onClick={() => setF((s) => ({ ...s, page: s.page + 1 }))}>Siguiente</button>
       </div>
     </div>
   );

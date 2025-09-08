@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import DiffMatchPatch from "diff-match-patch";
 import api from "../api";
 
+/* ===== helpers ===== */
 const escapeHtml = (s = "") =>
   s.replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
 
@@ -13,15 +14,19 @@ const filenameFromDisposition = (dispo = "") => {
 
 export default function ConvenioDetalle() {
   const { id } = useParams();
-  const [c, setC] = useState(null);
-  const [archivo, setArchivo] = useState(null);
-  const [vFile, setVFile] = useState(null);
-  const [observ, setObserv] = useState("");
+
+  const [c, setC] = useState(null);          // convenio
+  const [archivo, setArchivo] = useState(null); // archivo base (para subir/reemplazar)
+  const [vFile, setVFile] = useState(null);  // archivo de nueva versión
+  const [observ, setObserv] = useState("");  // observaciones de nueva versión
   const [versiones, setVersiones] = useState([]);
   const [lastCmp, setLastCmp] = useState(null);
+
+  // comparación manual
   const [selA, setSelA] = useState("");
   const [selB, setSelB] = useState("");
   const [diffHtml, setDiffHtml] = useState("");
+
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
@@ -30,7 +35,7 @@ export default function ConvenioDetalle() {
       api.get(`/convenios/${id}/versiones`),
     ]);
     setC(a.data);
-    setVersiones(b.data);
+    setVersiones(b.data || []);
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
@@ -52,6 +57,7 @@ export default function ConvenioDetalle() {
   };
 
   const eliminar = async () => {
+    if (!window.confirm("¿Eliminar el archivo base del convenio?")) return;
     try {
       setLoading(true);
       await api.delete(`/convenios/${id}/archivo`);
@@ -84,7 +90,8 @@ export default function ConvenioDetalle() {
     try {
       setLoading(true);
       const { data } = await api.post(`/convenios/${id}/versiones`, fd);
-      setVFile(null); setObserv("");
+      setVFile(null);
+      setObserv("");
       setLastCmp(data.comparacion || null);
       await load();
     } catch (err) {
@@ -106,8 +113,13 @@ export default function ConvenioDetalle() {
   };
 
   const eliminarV = async (vid) => {
-    await api.delete(`/versiones/${vid}`);
-    await load();
+    if (!window.confirm("¿Eliminar esta versión?")) return;
+    try {
+      await api.delete(`/versiones/${vid}`);
+      await load();
+    } catch (err) {
+      alert(err.response?.data?.message || "No se pudo eliminar la versión.");
+    }
   };
 
   /* ====== Comparación manual ====== */
@@ -143,6 +155,7 @@ export default function ConvenioDetalle() {
 
       <h2 style={{ marginTop: 8 }}>{c?.titulo || "..."}</h2>
       <div><b>Descripción:</b> {c?.descripcion || "—"}</div>
+      <div><b>Estado:</b> {c?.estado || "—"}</div> {/* <<<<<< añadido */}
       <div><b>Fecha de firma:</b> {c?.fecha_firma || "—"}</div>
       <div><b>Fecha de vencimiento:</b> {c?.fecha_vencimiento || "—"}</div>
 
@@ -194,6 +207,9 @@ export default function ConvenioDetalle() {
               </td>
             </tr>
           ))}
+          {versiones.length === 0 && (
+            <tr><td colSpan={5} align="center" style={{padding:12,color:"#666"}}>Sin versiones todavía.</td></tr>
+          )}
         </tbody>
       </table>
 

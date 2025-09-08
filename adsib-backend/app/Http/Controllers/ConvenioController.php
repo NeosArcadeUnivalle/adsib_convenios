@@ -49,8 +49,8 @@ class ConvenioController extends Controller
                       ->orWhereRaw('LOWER(descripcion) LIKE ?', [$t]);
                 });
             })
-            ->when($r->filled('estado'), function($qq) use ($r){
-                // si manejas estados en tu documento, agrega la columna y filtros; por ahora omitimos
+            ->when($r->filled('estado'), function ($qq) use ($r) {
+                $qq->where('estado', $r->estado);
             })
             ->when($r->filled('fi_from'), fn($qq)=>$qq->whereDate('fecha_firma','>=',$r->fi_from))
             ->when($r->filled('fi_to'),   fn($qq)=>$qq->whereDate('fecha_firma','<=',$r->fi_to))

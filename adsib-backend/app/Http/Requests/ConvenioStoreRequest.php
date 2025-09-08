@@ -17,8 +17,9 @@ class ConvenioStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'titulo'            => ['required','string','min:3','max:200', 'regex:/^[\pL\pN\pM\s\-\_\.\,:\(\)\/]+$/u'],
+            'titulo'            => ['required','string','min:3','max:200','regex:/^[\pL\pN\pM\s\-\_\.\,:\(\)\/]+$/u'],
             'descripcion'       => ['nullable','string','max:4000'],
+            'estado'            => ['nullable','in:BORRADOR,NEGOCIACION,VIGENTE,SUSPENDIDO,VENCIDO,RESCINDIDO,CERRADO'],
             'fecha_firma'       => ['nullable','date'],
             'fecha_vencimiento' => ['nullable','date','after_or_equal:fecha_firma'],
             'creado_por'        => ['nullable','integer'],

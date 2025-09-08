@@ -1,10 +1,10 @@
-import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useEffect, useState, useCallback } from "react";
+import { useNavigate, useParams, Link } from "react-router-dom";
 import api from "../api";
 
 const ESTADOS = ["BORRADOR","NEGOCIACION","VIGENTE","SUSPENDIDO","VENCIDO","RESCINDIDO","CERRADO"];
 
-// Regex unicode con fallback
+// Regex con soporte unicode y fallback
 let tituloAllowedRe, stripNotAllowedRe;
 try {
   tituloAllowedRe = new RegExp("^[\\p{L}\\p{N}\\s._,:()/-]+$", "u");
@@ -14,13 +14,28 @@ try {
   stripNotAllowedRe = /[^A-Za-zÀ-ÿ0-9\s._,:()/-]+/g;
 }
 
-export default function ConvenioCreate(){
+export default function ConvenioEdit(){
+  const { id } = useParams();
   const nav = useNavigate();
   const [f, setF] = useState({
     titulo:"", descripcion:"", estado:"BORRADOR", fecha_firma:"", fecha_vencimiento:""
   });
   const [archivo, setArchivo] = useState(null);
   const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await api.get(`/convenios/${id}`);
+    setF({
+      titulo: data.titulo || "",
+      descripcion: data.descripcion || "",
+      estado: data.estado || "BORRADOR",
+      fecha_firma: data.fecha_firma || "",
+      fecha_vencimiento: data.fecha_vencimiento || "",
+    });
+  }, [id]);
+
+  useEffect(() => { load(); }, [load]);
 
   const onKeyDownTitulo = (e) => {
     const k = e.key;
@@ -41,20 +56,16 @@ export default function ConvenioCreate(){
 
   const validate = () => {
     const errs = {};
-    const titulo = (f.titulo || "").trim();
-    if (!titulo) errs.titulo = "El título es obligatorio.";
-    else if (titulo.length < 3) errs.titulo = "Mínimo 3 caracteres.";
-    else if (titulo.length > 200) errs.titulo = "Máximo 200 caracteres.";
-    else if (!tituloAllowedRe.test(titulo)) errs.titulo = "Hay caracteres no permitidos.";
-
-    if (!ESTADOS.includes(f.estado)) errs.estado = "Estado inválido.";
-
+    const t = (f.titulo || "").trim();
+    if (!t) errs.titulo = "El título es obligatorio.";
+    else if (t.length < 3) errs.titulo = "Mínimo 3 caracteres.";
+    else if (t.length > 200) errs.titulo = "Máximo 200 caracteres.";
+    else if (!tituloAllowedRe.test(t)) errs.titulo = "Hay caracteres no permitidos.";
     if (f.descripcion && f.descripcion.length > 4000) errs.descripcion = "Máximo 4000 caracteres.";
     if (f.fecha_firma && isNaN(new Date(f.fecha_firma).getTime())) errs.fecha_firma = "Fecha inválida.";
     if (f.fecha_vencimiento && isNaN(new Date(f.fecha_vencimiento).getTime())) errs.fecha_vencimiento = "Fecha inválida.";
     if (f.fecha_firma && f.fecha_vencimiento && f.fecha_vencimiento < f.fecha_firma)
       errs.fecha_vencimiento = "La fecha de vencimiento no puede ser menor a la de firma.";
-
     if (archivo) {
       const ext = (archivo.name.split(".").pop() || "").toLowerCase();
       if (!["pdf","docx"].includes(ext)) errs.archivo = "El archivo debe ser PDF o DOCX.";
@@ -64,34 +75,32 @@ export default function ConvenioCreate(){
     return Object.keys(errs).length === 0;
   };
 
-  const submit = async (e)=>{
+  const submit = async (e) => {
     e.preventDefault();
-    if(!validate()) return;
+    if (!validate()) return;
 
     const fd = new FormData();
     fd.append("titulo", f.titulo.trim());
-    fd.append("estado", f.estado); // 👈 importante
-    if(f.descripcion)       fd.append("descripcion", f.descripcion);
-    if(f.fecha_firma)       fd.append("fecha_firma", f.fecha_firma);
-    if(f.fecha_vencimiento) fd.append("fecha_vencimiento", f.fecha_vencimiento);
-    if(archivo)             fd.append("archivo", archivo);
+    fd.append("estado", f.estado);
+    if (f.descripcion)       fd.append("descripcion", f.descripcion);
+    if (f.fecha_firma)       fd.append("fecha_firma", f.fecha_firma);
+    if (f.fecha_vencimiento) fd.append("fecha_vencimiento", f.fecha_vencimiento);
+    if (archivo)             fd.append("archivo", archivo);
 
     try {
-      const { data } = await api.post("/convenios", fd);
-      nav(`/convenios/${data.id}`);
+      setLoading(true);
+      await api.post(`/convenios/${id}?_method=PUT`, fd); // método PUT con form-data
+      nav(`/convenios/${id}`);
     } catch (er) {
       const v = er.response?.data?.errors || {};
-      setErrors({
-        ...v,
-        general: er.response?.data?.message || "No se pudo crear el convenio."
-      });
-    }
+      setErrors({ ...v, general: er.response?.data?.message || "No se pudo actualizar." });
+    } finally { setLoading(false); }
   };
 
   return (
     <div style={{padding:16, maxWidth:800, margin:"0 auto"}}>
       <Link to="/">← Volver</Link>
-      <h2>Nuevo Convenio</h2>
+      <h2>Editar Convenio</h2>
 
       {errors.general && (
         <div style={{background:"#ffe4e6",border:"1px solid #ffb4bb",padding:8,borderRadius:6}}>
@@ -114,7 +123,6 @@ export default function ConvenioCreate(){
           <select value={f.estado} onChange={(e)=>setF(s=>({...s,estado:e.target.value}))}>
             {ESTADOS.map((e)=> <option key={e} value={e}>{e}</option>)}
           </select>
-          {errors.estado && <div style={{color:"#b91c1c"}}>{errors.estado}</div>}
         </label>
 
         <div></div>
@@ -137,13 +145,12 @@ export default function ConvenioCreate(){
           {errors.fecha_vencimiento && <div style={{color:"#b91c1c"}}>{errors.fecha_vencimiento}</div>}
         </label>
 
-        <label style={{gridColumn:"span 2"}}>Archivo (PDF/DOCX)
-          <input type="file" accept=".pdf,.docx"
-            onChange={(e)=>setArchivo(e.target.files?.[0]||null)} />
+        <label style={{gridColumn:"span 2"}}>Reemplazar archivo (PDF/DOCX)
+          <input type="file" accept=".pdf,.docx" onChange={(e)=>setArchivo(e.target.files?.[0]||null)} />
           {errors.archivo && <div style={{color:"#b91c1c"}}>{errors.archivo}</div>}
         </label>
 
-        <div style={{gridColumn:"span 2"}}><button>Crear</button></div>
+        <div style={{gridColumn:"span 2"}}><button disabled={loading}>Guardar cambios</button></div>
       </form>
     </div>
   );
