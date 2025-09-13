@@ -7,6 +7,7 @@ import ConveniosList from "./pages/ConveniosList";
 import ConvenioCreate from "./pages/ConvenioCreate";
 import ConvenioDetalle from "./pages/ConvenioDetalle";
 import ConvenioEdit from "./pages/ConvenioEdit";
+import ConvenioComparar from "./pages/ConvenioComparar";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -18,6 +19,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
         <Route path="/convenios/nuevo" element={<ConvenioCreate />} />
         <Route path="/convenios/:id" element={<ConvenioDetalle />} />
         <Route path="/convenios/:id/editar" element={<ConvenioEdit />} />
+        <Route path="/convenios/:id/comparar" element={<ConvenioComparar />} />
       </Route>
     </Routes>
   </BrowserRouter>

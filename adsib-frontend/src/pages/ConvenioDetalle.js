@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
-import DiffMatchPatch from "diff-match-patch";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import api from "../api";
-
-/* ===== helpers ===== */
-const escapeHtml = (s = "") =>
-  s.replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
 
 const filenameFromDisposition = (dispo = "") => {
   const m = /filename\*=UTF-8''([^;]+)|filename="?([^"]+)"?/i.exec(dispo);
@@ -14,19 +9,13 @@ const filenameFromDisposition = (dispo = "") => {
 
 export default function ConvenioDetalle() {
   const { id } = useParams();
+  const nav = useNavigate();
 
-  const [c, setC] = useState(null);          // convenio
-  const [archivo, setArchivo] = useState(null); // archivo base (para subir/reemplazar)
-  const [vFile, setVFile] = useState(null);  // archivo de nueva versión
-  const [observ, setObserv] = useState("");  // observaciones de nueva versión
+  const [c, setC] = useState(null);
+  const [archivo, setArchivo] = useState(null);
+  const [vFile, setVFile] = useState(null);
+  const [observ, setObserv] = useState("");
   const [versiones, setVersiones] = useState([]);
-  const [lastCmp, setLastCmp] = useState(null);
-
-  // comparación manual
-  const [selA, setSelA] = useState("");
-  const [selB, setSelB] = useState("");
-  const [diffHtml, setDiffHtml] = useState("");
-
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
@@ -89,10 +78,8 @@ export default function ConvenioDetalle() {
     if (observ) fd.append("observaciones", observ);
     try {
       setLoading(true);
-      const { data } = await api.post(`/convenios/${id}/versiones`, fd);
-      setVFile(null);
-      setObserv("");
-      setLastCmp(data.comparacion || null);
+      await api.post(`/convenios/${id}/versiones`, fd);
+      setVFile(null); setObserv("");
       await load();
     } catch (err) {
       alert(err.response?.data?.message || "Error al crear versión");
@@ -122,42 +109,19 @@ export default function ConvenioDetalle() {
     }
   };
 
-  /* ====== Comparación manual ====== */
-  const comparar = async (e) => {
-    e.preventDefault();
-    if (!selA || !selB || selA === selB) {
-      alert("Selecciona dos versiones distintas"); return;
-    }
-    try {
-      setLoading(true);
-      const [ta, tb] = await Promise.all([
-        api.get(`/versiones/${selA}/texto`),
-        api.get(`/versiones/${selB}/texto`),
-      ]);
-      const dmp = new DiffMatchPatch();
-      const diffs = dmp.diff_main(ta.data.text || "", tb.data.text || "");
-      dmp.diff_cleanupSemantic(diffs);
-      const html = diffs.map(([op, data]) => {
-        if (op === 1)  return `<ins style="background:#dcfce7">${escapeHtml(data)}</ins>`;
-        if (op === -1) return `<del style="background:#fee2e2">${escapeHtml(data)}</del>`;
-        return `<span>${escapeHtml(data)}</span>`;
-      }).join("");
-      setDiffHtml(html);
-    } catch (err) {
-      alert(err.response?.data?.message || "No se pudo comparar (¿archivo soportado?)");
-      setDiffHtml("");
-    } finally { setLoading(false); }
-  };
-
   return (
     <div style={{ padding: 16 }}>
       <Link to="/">← Volver</Link>
 
       <h2 style={{ marginTop: 8 }}>{c?.titulo || "..."}</h2>
       <div><b>Descripción:</b> {c?.descripcion || "—"}</div>
-      <div><b>Estado:</b> {c?.estado || "—"}</div> {/* <<<<<< añadido */}
+      <div><b>Estado:</b> {c?.estado || "—"}</div>
       <div><b>Fecha de firma:</b> {c?.fecha_firma || "—"}</div>
       <div><b>Fecha de vencimiento:</b> {c?.fecha_vencimiento || "—"}</div>
+
+      <div style={{marginTop: 12}}>
+        <button onClick={()=>nav(`/convenios/${id}/comparar`)}>Abrir comparador</button>
+      </div>
 
       <h3 style={{ marginTop: 16 }}>Archivo del convenio</h3>
       {c?.archivo_nombre_original ? (
@@ -182,14 +146,6 @@ export default function ConvenioDetalle() {
         <button type="submit" disabled={!vFile || loading}>+ Nueva versión</button>
       </form>
 
-      {lastCmp && (
-        <div style={{marginTop:10, padding:8, border:"1px solid #e5e7eb", borderRadius:8}}>
-          <b>Comparación reciente:</b> {lastCmp.resumen_cambios}
-          {lastCmp.diferencias_detectadas?.similaridad_texto != null &&
-            <div>Similitud de texto: {lastCmp.diferencias_detectadas.similaridad_texto}%</div>}
-        </div>
-      )}
-
       <table width="100%" cellPadding={6} style={{ marginTop: 10, borderCollapse: "collapse" }}>
         <thead><tr>
           <th>v</th><th align="left">Archivo</th><th>Fecha</th><th>Observaciones</th><th></th>
@@ -212,31 +168,6 @@ export default function ConvenioDetalle() {
           )}
         </tbody>
       </table>
-
-      {/* Comparación manual */}
-      <h3 style={{marginTop:24}}>Comparar versiones</h3>
-      <form onSubmit={comparar} style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-        <select value={selA} onChange={e=>setSelA(e.target.value)}>
-          <option value="">Versión A…</option>
-          {versiones.map(v => <option key={v.id} value={v.id}>v{v.numero_version}</option>)}
-        </select>
-        <span>vs</span>
-        <select value={selB} onChange={e=>setSelB(e.target.value)}>
-          <option value="">Versión B…</option>
-          {versiones.map(v => <option key={v.id} value={v.id}>v{v.numero_version}</option>)}
-        </select>
-        <button type="submit" disabled={!selA || !selB || loading}>Comparar</button>
-      </form>
-
-      {diffHtml && (
-        <div style={{marginTop:10, padding:10, border:"1px solid #e5e7eb", borderRadius:8, maxHeight:300, overflow:"auto"}}>
-          <div style={{marginBottom:6, fontSize:12, color:"#666"}}>
-            <span style={{background:"#fee2e2"}}> eliminado </span> /
-            <span style={{background:"#dcfce7"}}> agregado </span>
-          </div>
-          <div dangerouslySetInnerHTML={{__html: diffHtml}} />
-        </div>
-      )}
     </div>
   );
 }

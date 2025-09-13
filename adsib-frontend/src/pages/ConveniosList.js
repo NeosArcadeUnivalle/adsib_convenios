@@ -18,15 +18,18 @@ const daysLeft = (dateStr) => {
   const t = new Date(); t.setHours(0, 0, 0, 0);
   return Math.floor((end - t) / (1000 * 60 * 60 * 24));
 };
+// Formato solo YYYY-MM-DD (evita mostrar la hora con Z)
+const fmtDate = (s) => (s ? String(s).slice(0, 10) : "—");
+
 const BadgeVence = ({ date }) => {
   const d = daysLeft(date);
   if (d === null) return <span>—</span>;
   let bg = "#e5e7eb", txt = `${d}d`;
-  if (d < 0) { bg = "#fecaca"; txt = `Vencido ${Math.abs(d)}d`; }
-  else if (d === 0) bg = "#fde68a";
-  else if (d <= 30) bg = "#fde68a";
-  else if (d <= 60) bg = "#fef3c7";
-  else bg = "#dcfce7";
+  if (d < 0)     { bg = "#fecaca"; txt = `Vencido ${Math.abs(d)}d`; }
+  else if (d === 0) { bg = "#fecaca"; txt = "Vencido hoy"; } // 👈 pedido
+  else if (d <= 30) { bg = "#fde68a"; }
+  else if (d <= 60) { bg = "#fef3c7"; }
+  else              { bg = "#dcfce7"; }
   return <span style={{ padding: "2px 6px", borderRadius: 6, background: bg }}>{txt}</span>;
 };
 
@@ -36,17 +39,12 @@ export default function ConveniosList() {
   const [rows, setRows] = useState([]);
   const [meta, setMeta] = useState({ last_page: 1 });
   const [f, setF] = useState({
-    q: "",
-    estado: "",
-    fi_from: "",
-    fi_to: "",
-    fv_from: "",
-    fv_to: "",
+    q: "", estado: "",
+    fi_from: "", fi_to: "",
+    fv_from: "", fv_to: "",
     prox30: false,
-    sort: "fecha_vencimiento",
-    dir: "asc",
-    page: 1,
-    per_page: 10,
+    sort: "fecha_vencimiento", dir: "asc",
+    page: 1, per_page: 10,
   });
 
   const qs = useMemo(() => {
@@ -57,10 +55,8 @@ export default function ConveniosList() {
     if (f.fi_to) p.set("fi_to", f.fi_to);
     if (f.fv_from) p.set("fv_from", f.fv_from);
     if (f.fv_to) p.set("fv_to", f.fv_to);
-    p.set("sort", f.sort);
-    p.set("dir", f.dir);
-    p.set("page", f.page);
-    p.set("per_page", f.per_page);
+    p.set("sort", f.sort); p.set("dir", f.dir);
+    p.set("page", f.page); p.set("per_page", f.per_page);
     return p.toString();
   }, [f]);
 
@@ -77,16 +73,14 @@ export default function ConveniosList() {
   const toggleProx30 = () => {
     setF((s) => {
       const prox30 = !s.prox30;
-      if (prox30) {
-        return { ...s, prox30, fv_from: isoToday(), fv_to: isoPlusDays(30), page: 1 };
-      }
+      if (prox30) return { ...s, prox30, fv_from: isoToday(), fv_to: isoPlusDays(30), page: 1 };
       return { ...s, prox30, fv_from: "", fv_to: "", page: 1 };
     });
   };
 
   const limpiarFiltros = () =>
-    setF((s) => ({
-      ...s, q: "", estado: "", fi_from: "", fi_to: "", fv_from: "", fv_to: "",
+    setF((s) => ({ ...s,
+      q: "", estado: "", fi_from: "", fi_to: "", fv_from: "", fv_to: "",
       prox30: false, page: 1, sort: "fecha_vencimiento", dir: "asc", per_page: 10,
     }));
 
@@ -177,14 +171,13 @@ export default function ConveniosList() {
         <tbody>
           {rows.map((r) => {
             const d = daysLeft(r.fecha_vencimiento);
-            // 🔴 rojo claro cuando 0d o ya vencido
-            const resaltado = (d !== null && d <= 0) ? "#fee2e2" : undefined;
+            const resaltado = (d !== null && d <= 0) ? "#fee2e2" : undefined; // rojo 0 o vencidos
             return (
               <tr key={r.id} style={{ borderTop: "1px solid #eee", background: resaltado }}>
                 <td>{r.titulo}</td>
                 <td>{r.descripcion?.slice(0, 60) || "—"}</td>
                 <td align="center">{r.estado || "—"}</td>
-                <td align="center">{r.fecha_firma || "—"}</td>
+                <td align="center">{fmtDate(r.fecha_firma)}</td>
                 <td align="center"><BadgeVence date={r.fecha_vencimiento} /></td>
                 <td align="center">{r.archivo_nombre_original ? "Sí" : "—"}</td>
                 <td style={{whiteSpace:"nowrap"}}>
