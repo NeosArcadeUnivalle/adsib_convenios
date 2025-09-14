@@ -5,6 +5,16 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ConvenioController;
 use App\Http\Controllers\VersionController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\NotificationsController;
+
+Route::get('/notificaciones',                 [NotificationsController::class, 'index']);
+Route::patch('/notificaciones/{id}/leer',     [NotificationsController::class, 'markRead']);
+Route::patch('/notificaciones/leer-todas',    [NotificationsController::class, 'markAllRead']);
+Route::delete('/notificaciones/{id}',         [NotificationsController::class, 'destroy']);
+Route::get('/notificaciones/vencidos',        [NotificationsController::class, 'vencidos']);
+
+Route::get('/dashboard/resumen', [DashboardController::class, 'resumen']); // ← si ya tienes auth: añade ->middleware('auth:sanctum')
 
 /* Auth pública */
 Route::post('/auth/login',  [AuthController::class, 'login']);

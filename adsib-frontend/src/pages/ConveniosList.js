@@ -1,32 +1,30 @@
+// src/pages/ConveniosList.js
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import api, { clearToken } from "../api";
+import api from "../api";
 
-/* ==== helpers ==== */
-const isoToday = () => {
-  const d = new Date(); d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
+/* ==== helpers (fechas locales puras) ==== */
+const parseLocalDate = (s) => {
+  if (!s) return null;
+  const d = String(s).slice(0,10);
+  const [y,m,day] = d.split("-").map(Number);
+  return new Date(y, (m||1)-1, day||1);
 };
-const isoPlusDays = (n) => {
-  const d = new Date(); d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
-};
+const todayLocal = () => { const d=new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
 const daysLeft = (dateStr) => {
-  if (!dateStr) return null;
-  const end = new Date(dateStr);
-  const t = new Date(); t.setHours(0, 0, 0, 0);
-  return Math.floor((end - t) / (1000 * 60 * 60 * 24));
+  const end = parseLocalDate(dateStr);
+  if (!end) return null;
+  const t = todayLocal();
+  return Math.round((end - t) / 86400000);
 };
-// Formato solo YYYY-MM-DD (evita mostrar la hora con Z)
-const fmtDate = (s) => (s ? String(s).slice(0, 10) : "—");
+const fmtDate = (s) => (s ? String(s).slice(0,10) : "—");
 
 const BadgeVence = ({ date }) => {
   const d = daysLeft(date);
   if (d === null) return <span>—</span>;
   let bg = "#e5e7eb", txt = `${d}d`;
   if (d < 0)     { bg = "#fecaca"; txt = `Vencido ${Math.abs(d)}d`; }
-  else if (d === 0) { bg = "#fecaca"; txt = "Vencido hoy"; } // 👈 pedido
+  else if (d === 0) { bg = "#fecaca"; txt = "Vencido hoy"; }
   else if (d <= 30) { bg = "#fde68a"; }
   else if (d <= 60) { bg = "#fef3c7"; }
   else              { bg = "#dcfce7"; }
@@ -73,8 +71,12 @@ export default function ConveniosList() {
   const toggleProx30 = () => {
     setF((s) => {
       const prox30 = !s.prox30;
-      if (prox30) return { ...s, prox30, fv_from: isoToday(), fv_to: isoPlusDays(30), page: 1 };
-      return { ...s, prox30, fv_from: "", fv_to: "", page: 1 };
+      const d = todayLocal();
+      const from = d.toISOString().slice(0,10);
+      const to   = new Date(d.getFullYear(), d.getMonth(), d.getDate()+30).toISOString().slice(0,10);
+      return prox30
+        ? { ...s, prox30, fv_from: from, fv_to: to, page: 1 }
+        : { ...s, prox30, fv_from: "", fv_to: "", page: 1 };
     });
   };
 
@@ -83,11 +85,6 @@ export default function ConveniosList() {
       q: "", estado: "", fi_from: "", fi_to: "", fv_from: "", fv_to: "",
       prox30: false, page: 1, sort: "fecha_vencimiento", dir: "asc", per_page: 10,
     }));
-
-  const logout = async () => {
-    try { await api.post("/auth/logout"); } catch {}
-    clearToken(); window.location.href = "/login";
-  };
 
   const eliminar = async (id) => {
     if (!window.confirm("¿Eliminar este convenio? Esta acción no se puede deshacer.")) return;
@@ -100,50 +97,46 @@ export default function ConveniosList() {
   };
 
   return (
-    <div style={{ padding: 16 }}>
-      <h2 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        Convenios
-        <div style={{ display: "flex", gap: 8 }}>
-          <Link to="/convenios/nuevo"><button>+ Nuevo</button></Link>
-          <button onClick={logout}>Salir</button>
-        </div>
-      </h2>
+    <div className="container">
+      <h2>Convenios</h2>
 
       {/* Filtros */}
-      <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(6,1fr)", margin: "8px 0 12px" }}>
+      <div className="toolbar" style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(6,1fr)", margin: "8px 0 12px" }}>
         <input
+          className="input"
           placeholder="Buscar por título o descripción..."
           value={f.q}
           onChange={(e) => setF((s) => ({ ...s, q: e.target.value, page: 1 }))}
           style={{ gridColumn: "span 2" }}
         />
 
-        <select value={f.estado} onChange={(e)=>setF(s=>({...s, estado: e.target.value, page:1}))}>
+        <select className="select" value={f.estado} onChange={(e)=>setF(s=>({...s, estado: e.target.value, page:1}))}>
           <option value="">Todos los estados</option>
           {ESTADOS.map((e)=> <option key={e} value={e}>{e}</option>)}
         </select>
 
-        <select value={f.sort} onChange={(e) => setF((s) => ({ ...s, sort: e.target.value }))}>
+        <select className="select" value={f.sort} onChange={(e) => setF((s) => ({ ...s, sort: e.target.value }))}>
           <option value="fecha_vencimiento">Ordenar por Vencimiento</option>
           <option value="fecha_firma">Ordenar por Firma</option>
           <option value="titulo">Ordenar por Título</option>
           <option value="updated_at">Ordenar por Actualizado</option>
         </select>
 
-        <select value={f.dir} onChange={(e) => setF((s) => ({ ...s, dir: e.target.value }))}>
+        <select className="select" value={f.dir} onChange={(e) => setF((s) => ({ ...s, dir: e.target.value }))}>
           <option value="asc">Asc</option>
           <option value="desc">Desc</option>
         </select>
 
         <input
+          className="input"
           type="number" min={1} max={100} value={f.per_page}
           onChange={(e) => setF((s) => ({ ...s, per_page: +e.target.value || 10, page: 1 }))}
         />
 
-        <div>Firma de: <input type="date" value={f.fi_from} onChange={(e) => setF((s) => ({ ...s, fi_from: e.target.value, page: 1 }))} /></div>
-        <div>Firma a:   <input type="date" value={f.fi_to}   onChange={(e) => setF((s) => ({ ...s, fi_to: e.target.value, page: 1 }))} /></div>
-        <div>Vence de:  <input type="date" value={f.fv_from} onChange={(e) => setF((s) => ({ ...s, fv_from: e.target.value, prox30:false, page: 1 }))} /></div>
-        <div>Vence a:   <input type="date" value={f.fv_to}   onChange={(e) => setF((s) => ({ ...s, fv_to: e.target.value, prox30:false, page: 1 }))} /></div>
+        <div>Firma de: <input className="input" type="date" value={f.fi_from} onChange={(e) => setF((s) => ({ ...s, fi_from: e.target.value, page: 1 }))} /></div>
+        <div>Firma a:   <input className="input" type="date" value={f.fi_to}   onChange={(e) => setF((s) => ({ ...s, fi_to: e.target.value, page: 1 }))} /></div>
+        <div>Vence de:  <input className="input" type="date" value={f.fv_from} onChange={(e) => setF((s) => ({ ...s, fv_from: e.target.value, prox30:false, page: 1 }))} /></div>
+        <div>Vence a:   <input className="input" type="date" value={f.fv_to}   onChange={(e) => setF((s) => ({ ...s, fv_to: e.target.value, prox30:false, page: 1 }))} /></div>
 
         <label style={{ gridColumn: "span 2", display: "flex", alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={f.prox30} onChange={toggleProx30} />
@@ -151,51 +144,56 @@ export default function ConveniosList() {
         </label>
 
         <div style={{ gridColumn: "span 6", display: "flex", gap: 8 }}>
-          <button onClick={limpiarFiltros}>Limpiar filtros</button>
+          <button className="btn" onClick={limpiarFiltros}>Limpiar filtros</button>
         </div>
       </div>
 
       {/* Tabla */}
-      <table width="100%" cellPadding={6} style={{ borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            <th align="left">Título</th>
-            <th align="left">Descripción</th>
-            <th>Estado</th>
-            <th>Firma</th>
-            <th>Vencimiento</th>
-            <th>Archivo</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const d = daysLeft(r.fecha_vencimiento);
-            const resaltado = (d !== null && d <= 0) ? "#fee2e2" : undefined; // rojo 0 o vencidos
-            return (
-              <tr key={r.id} style={{ borderTop: "1px solid #eee", background: resaltado }}>
-                <td>{r.titulo}</td>
-                <td>{r.descripcion?.slice(0, 60) || "—"}</td>
-                <td align="center">{r.estado || "—"}</td>
-                <td align="center">{fmtDate(r.fecha_firma)}</td>
-                <td align="center"><BadgeVence date={r.fecha_vencimiento} /></td>
-                <td align="center">{r.archivo_nombre_original ? "Sí" : "—"}</td>
-                <td style={{whiteSpace:"nowrap"}}>
-                  <Link to={`/convenios/${r.id}`}>Ver</Link>{" "}
-                  <Link to={`/convenios/${r.id}/editar`}>Editar</Link>{" "}
-                  <button onClick={() => eliminar(r.id)} style={{marginLeft:4}}>Eliminar</button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className="card">
+        <table className="table">
+          <thead>
+            <tr>
+              <th align="left">Título</th>
+              <th align="left">Descripción</th>
+              <th>Estado</th>
+              <th>Firma</th>
+              <th>Vencimiento</th>
+              <th>Archivo</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const d = daysLeft(r.fecha_vencimiento);
+              const resaltado = (d !== null && d <= 0) ? "#fee2e2" : undefined;
+              return (
+                <tr key={r.id} style={{ background: resaltado }}>
+                  <td>{r.titulo}</td>
+                  <td>{r.descripcion?.slice(0, 60) || "—"}</td>
+                  <td align="center">{r.estado || "—"}</td>
+                  <td align="center">{fmtDate(r.fecha_firma)}</td>
+                  <td align="center"><BadgeVence date={r.fecha_vencimiento} /></td>
+                  <td align="center">{r.archivo_nombre_original ? "Sí" : "—"}</td>
+                  <td style={{whiteSpace:"nowrap"}}>
+                    <Link to={`/convenios/${r.id}`}>Ver</Link>{" "}
+                    <Link to={`/convenios/${r.id}/editar`}>Editar</Link>{" "}
+                    <button className="btn btn-danger" onClick={() => eliminar(r.id)} style={{marginLeft:4}}>Eliminar</button>
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 && (
+              <tr><td colSpan={7} style={{padding:10, color:"#6b7280"}}>Sin resultados.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
       {/* Paginación */}
-      <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
-        <button disabled={f.page <= 1} onClick={() => setF((s) => ({ ...s, page: s.page - 1 }))}>Anterior</button>
-        <span>Página {f.page} / {meta.last_page}</span>
-        <button disabled={f.page >= meta.last_page} onClick={() => setF((s) => ({ ...s, page: s.page + 1 }))}>Siguiente</button>
+      <div className="toolbar" style={{ justifyContent:"center" }}>
+        <button className="btn" disabled={f.page <= 1} onClick={() => setF((s) => ({ ...s, page: s.page - 1 }))}>Anterior</button>
+        <span style={{padding:"0 10px"}}>Página {f.page} / {meta.last_page}</span>
+        <button className="btn" disabled={f.page >= meta.last_page} onClick={() => setF((s) => ({ ...s, page: s.page + 1 }))}>Siguiente</button>
       </div>
     </div>
   );
