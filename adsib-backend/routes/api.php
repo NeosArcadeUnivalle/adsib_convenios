@@ -7,6 +7,11 @@ use App\Http\Controllers\ConvenioController;
 use App\Http\Controllers\VersionController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\NotificationsController;
+use App\Http\Controllers\UsuarioController;
+
+Route::apiResource('usuarios', UsuarioController::class)->parameters([
+    'usuarios' => 'id'
+]);
 
 Route::get('/notificaciones',                 [NotificationsController::class, 'index']);
 Route::patch('/notificaciones/{id}/leer',     [NotificationsController::class, 'markRead']);

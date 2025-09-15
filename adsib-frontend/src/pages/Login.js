@@ -43,7 +43,7 @@ export default function Login() {
             onChange={(e)=>setF(s=>({...s, password: e.target.value}))}
             minLength={6} />
         </label>
-        <button>Entrar</button>
+        <button>Ingresar</button>
       </form>
     </div>
   );

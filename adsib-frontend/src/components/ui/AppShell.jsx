@@ -15,6 +15,7 @@ export default function AppShell() {
         <div style={{display:"flex", alignItems:"center", gap:12}}>
           <Link to="/" style={{ textDecoration:"none", fontWeight:700 }}>📁 Convenios</Link>
           <Link to="/convenios/nuevo">+ Nuevo</Link>
+          <Link to="/usuarios">Usuarios</Link> {/* ⬅️ nuevo */}
         </div>
         <div style={{display:"flex", alignItems:"center", gap:16}}>
           <NotificationsBell />
