@@ -11,7 +11,7 @@ class AuthController extends Controller
     {
         $cred = $r->validate([
             'email'    => 'required|email',
-            'password' => 'required|string|min:6|max:100',
+            'password' => 'required|string|min:8|max:100',
         ], [
             'email.required'    => 'El correo es obligatorio.',
             'email.email'       => 'Formato de correo inválido.',

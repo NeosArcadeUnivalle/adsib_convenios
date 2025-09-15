@@ -20,14 +20,14 @@ const daysLeft = (dateStr) => {
 const fmtDate = (s) => (s ? String(s).slice(0,10) : "—");
 
 const BadgeVence = ({ date }) => {
-  const d = daysLeft(date);
+  const d = daysLeft(date); 
   if (d === null) return <span>—</span>;
-  let bg = "#e5e7eb", txt = `${d}d`;
-  if (d < 0)     { bg = "#fecaca"; txt = `Vencido ${Math.abs(d)}d`; }
-  else if (d === 0) { bg = "#fecaca"; txt = "Vencido hoy"; }
-  else if (d <= 30) { bg = "#fde68a"; }
-  else if (d <= 60) { bg = "#fef3c7"; }
-  else              { bg = "#dcfce7"; }
+  let bg = "#817f00ff", txt = `${d}d`;
+  if (d < 0)     { bg = "#c90000ff"; txt = `Vencido ${Math.abs(d)}d`; }
+  else if (d === 0) { bg = "#c90000ff"; txt = "Vencido hoy"; }
+  else if (d <= 30) { bg = "#817f00ff"; }
+  else if (d <= 60) { bg = "#817f00ff"; }
+  else              { bg = "#817f00ff"; }
   return <span style={{ padding: "2px 6px", borderRadius: 6, background: bg }}>{txt}</span>;
 };
 
@@ -165,7 +165,7 @@ export default function ConveniosList() {
           <tbody>
             {rows.map((r) => {
               const d = daysLeft(r.fecha_vencimiento);
-              const resaltado = (d !== null && d <= 0) ? "#fee2e2" : undefined;
+              const resaltado = (d !== null && d <= 0) ? "#3a0000ff" : undefined;
               return (
                 <tr key={r.id} style={{ background: resaltado }}>
                   <td>{r.titulo}</td>

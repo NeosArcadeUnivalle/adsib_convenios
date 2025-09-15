@@ -14,9 +14,12 @@ export default function Login() {
   };
 
   const submit = async (e) => {
-    e.preventDefault(); setErr("");
+    e.preventDefault();
+    setErr("");
+
     if (!emailRe.test(f.email)) return setErr("Correo inválido.");
-    if (f.password.length < 6) return setErr("La contraseña debe tener al menos 6 caracteres.");
+    if (f.password.length < 8) return setErr("La contraseña debe tener al menos 8 caracteres.");
+
     try {
       const { data } = await api.post("/auth/login", f);
       setToken(data.token);
@@ -26,23 +29,78 @@ export default function Login() {
     }
   };
 
+  // ===== estilos mínimos y responsive =====
+  const card = {
+    width: "clamp(280px, 92vw, 440px)",
+    margin: "min(8vh, 60px) auto",
+    padding: 20,
+    border: "1px solid rgba(255,255,255,.15)",
+    borderRadius: 12,
+    // 👇 quitamos el scroll interno para evitar barra lateral en la tarjeta
+    // maxHeight / overflowY eliminados
+  };
+  const errorBox = {
+    background: "#fee2e2",
+    color: "#7f1d1d",
+    border: "1px solid #fecaca",
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 10,
+  };
+
   return (
-    <div style={{maxWidth:380, margin:"60px auto", padding:16, border:"1px solid #eee", borderRadius:10}}>
-      <h2>Iniciar sesión</h2>
-      {err && <div style={{background:"#ffe4e6", border:"1px solid #ffb4bb", padding:8, borderRadius:6}}>{err}</div>}
-      <form onSubmit={submit} style={{display:"grid", gap:10}}>
-        <label>Correo
-          <input type="email" value={f.email}
+    <div style={card}>
+      <h2 style={{ marginTop: 0, textAlign: "center", fontSize: "clamp(22px, 3.2vw, 28px)" }}>
+        Iniciar sesión
+      </h2>
+
+      {/* Logo centrado y redondo. Pon el archivo en /public/adsib-logo.jpg */}
+      <img
+        src="/adsib.jpg"
+        alt="ADSIB"
+        style={{
+          width: "min(140px, 40vw)",
+          height: "min(140px, 40vw)",
+          objectFit: "cover",
+          borderRadius: "50%",
+          display: "block",
+          margin: "12px auto 16px",
+          border: "2px solid rgba(255,255,255,.25)",
+        }}
+      />
+
+      {err && <div style={errorBox}>{err}</div>}
+
+      <form onSubmit={submit} style={{ display: "grid", gap: 12 }}>
+        <label>
+          Correo
+          <input
+            type="email"
+            value={f.email}
             onKeyDown={onKeyDownNoSpaces}
-            onChange={(e)=>setF(s=>({...s, email: e.target.value.trim()}))}
-            placeholder="usuario@dominio.com" />
+            onChange={(e) => setF((s) => ({ ...s, email: e.target.value.trim() }))}
+            placeholder="usuario@dominio.com"
+            required
+            autoComplete="username"
+            style={{ width: "100%" }}
+          />
         </label>
-        <label>Contraseña
-          <input type="password" value={f.password}
+
+        <label>
+          Contraseña
+          <input
+            type="password"
+            value={f.password}
             onKeyDown={onKeyDownNoSpaces}
-            onChange={(e)=>setF(s=>({...s, password: e.target.value}))}
-            minLength={6} />
+            onChange={(e) => setF((s) => ({ ...s, password: e.target.value }))}
+            minLength={8}
+            placeholder="••••••••"
+            required
+            autoComplete="current-password"
+            style={{ width: "100%" }}
+          />
         </label>
+
         <button>Ingresar</button>
       </form>
     </div>

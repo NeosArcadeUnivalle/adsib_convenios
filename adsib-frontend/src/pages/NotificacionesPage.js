@@ -80,7 +80,7 @@ export default function NotificacionesPage(){
               {vencidos.map(v=>{
                 const d = daysOver(v.fecha_vencimiento); // <= 0 vencido
                 return (
-                  <tr key={v.id} style={{ background: (d<=0) ? "#fee2e2" : undefined }}>
+                  <tr key={v.id} style={{ background: (d<=0) ? "#3a0000ff" : undefined }}>
                     <td>{v.titulo}</td>
                     <td align="center">{v.estado||"—"}</td>
                     <td align="center">{fmt(v.fecha_vencimiento)}</td>
