@@ -1,3 +1,4 @@
+// src/pages/Login.js
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api, { setToken } from "../api";
@@ -8,6 +9,7 @@ export default function Login() {
   const nav = useNavigate();
   const [f, setF] = useState({ email: "", password: "" });
   const [err, setErr] = useState("");
+  const [hover, setHover] = useState(false); // <-- para el hover del botón
 
   const onKeyDownNoSpaces = (e) => {
     if (e.key === " " && e.target.selectionStart === 0) e.preventDefault();
@@ -34,18 +36,29 @@ export default function Login() {
     width: "clamp(280px, 92vw, 440px)",
     margin: "min(8vh, 60px) auto",
     padding: 20,
-    border: "1px solid rgba(255,255,255,.15)",
+    border: "1px solid #1a6779ff",
     borderRadius: 12,
-    // 👇 quitamos el scroll interno para evitar barra lateral en la tarjeta
-    // maxHeight / overflowY eliminados
   };
   const errorBox = {
-    background: "#fee2e2",
-    color: "#7f1d1d",
-    border: "1px solid #fecaca",
+    background: "#b80909ff",
+    color: "#ffffffff",
+    border: "1px solid #ffffffff",
     padding: 10,
     borderRadius: 8,
     marginBottom: 10,
+  };
+
+  // botón celeste oscuro + hover más claro
+  const btnStyle = {
+    background: hover ? "#0d839bff" : "#1a6779ff", // celeste oscuro -> más claro en hover
+    color: "#ffffff",
+    border: "1px solid #0aa4caff",
+    borderRadius: 8,
+    padding: "12px 16px",
+    fontWeight: 600,
+    width: "100%",
+    transition: "background .15s ease",
+    cursor: "pointer",
   };
 
   return (
@@ -54,18 +67,18 @@ export default function Login() {
         Iniciar sesión
       </h2>
 
-      {/* Logo centrado y redondo. Pon el archivo en /public/adsib-logo.jpg */}
+      {/* Logo centrado y redondo. Coloca el archivo en /public/adsib.jpg */}
       <img
         src="/adsib.jpg"
         alt="ADSIB"
         style={{
-          width: "min(140px, 40vw)",
-          height: "min(140px, 40vw)",
+          width: "min(160px, 42vw)",
+          height: "min(160px, 42vw)",
           objectFit: "cover",
           borderRadius: "50%",
           display: "block",
           margin: "12px auto 16px",
-          border: "2px solid rgba(255,255,255,.25)",
+          border: "2px solid #1a6779ff",
         }}
       />
 
@@ -101,7 +114,14 @@ export default function Login() {
           />
         </label>
 
-        <button>Ingresar</button>
+        <button
+          type="submit"
+          style={btnStyle}
+          onMouseEnter={() => setHover(true)}
+          onMouseLeave={() => setHover(false)}
+        >
+          Ingresar
+        </button>
       </form>
     </div>
   );

@@ -2,17 +2,24 @@ import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import api from "../api";
 
-const ESTADOS = ["BORRADOR","NEGOCIACION","VIGENTE","SUSPENDIDO","VENCIDO","RESCINDIDO","CERRADO"];
+const ESTADOS = ["BORRADOR","NEGOCIACION","VIGENTE","SUSPENDIDO","RESCINDIDO","CERRADO"];
 
 // Regex con soporte unicode y fallback
 let tituloAllowedRe, stripNotAllowedRe;
 try {
   tituloAllowedRe = new RegExp("^[\\p{L}\\p{N}\\s._,:()/-]+$", "u");
   stripNotAllowedRe = new RegExp("[^\\p{L}\\p{N}\\s._,:()/-]+", "gu");
-} catch (e) {
+} catch {
   tituloAllowedRe = /^[A-Za-zÀ-ÿ0-9\s._,:()/-]+$/;
   stripNotAllowedRe = /[^A-Za-zÀ-ÿ0-9\s._,:()/-]+/g;
 }
+
+/* Estilos locales para botones (no toca AppShell.css) */
+const BTN = {
+  back:   { background:"#374151", borderColor:"#4b5563", color:"#e5e7eb" },
+  save:   { background:"#0ea5e9", borderColor:"#0369a1", color:"#fff" },
+  saveDis:{ background:"#93c5fd", borderColor:"#93c5fd", color:"#1f2937", cursor:"not-allowed", opacity:.9 },
+};
 
 export default function ConvenioEdit(){
   const { id } = useParams();
@@ -61,11 +68,13 @@ export default function ConvenioEdit(){
     else if (t.length < 3) errs.titulo = "Mínimo 3 caracteres.";
     else if (t.length > 200) errs.titulo = "Máximo 200 caracteres.";
     else if (!tituloAllowedRe.test(t)) errs.titulo = "Hay caracteres no permitidos.";
+
     if (f.descripcion && f.descripcion.length > 4000) errs.descripcion = "Máximo 4000 caracteres.";
     if (f.fecha_firma && isNaN(new Date(f.fecha_firma).getTime())) errs.fecha_firma = "Fecha inválida.";
     if (f.fecha_vencimiento && isNaN(new Date(f.fecha_vencimiento).getTime())) errs.fecha_vencimiento = "Fecha inválida.";
     if (f.fecha_firma && f.fecha_vencimiento && f.fecha_vencimiento < f.fecha_firma)
       errs.fecha_vencimiento = "La fecha de vencimiento no puede ser menor a la de firma.";
+
     if (archivo) {
       const ext = (archivo.name.split(".").pop() || "").toLowerCase();
       if (!["pdf","docx"].includes(ext)) errs.archivo = "El archivo debe ser PDF o DOCX.";
@@ -89,7 +98,7 @@ export default function ConvenioEdit(){
 
     try {
       setLoading(true);
-      await api.post(`/convenios/${id}?_method=PUT`, fd); // método PUT con form-data
+      await api.post(`/convenios/${id}?&_method=PUT`, fd); // PUT via form-data
       nav(`/convenios/${id}`);
     } catch (er) {
       const v = er.response?.data?.errors || {};
@@ -98,59 +107,84 @@ export default function ConvenioEdit(){
   };
 
   return (
-    <div style={{padding:16, maxWidth:800, margin:"0 auto"}}>
-      <Link to="/">← Volver</Link>
-      <h2>Editar Convenio</h2>
+    <div className="card" style={{ padding:20 }}>
+      {/* Header con botón Volver y título */}
+      <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14}}>
+        <Link to="/" className="btn" style={BTN.back}>Volver</Link>
+        <h2 style={{margin:0}}>Editar Convenio</h2>
+        <span />
+      </div>
 
       {errors.general && (
-        <div style={{background:"#ffe4e6",border:"1px solid #ffb4bb",padding:8,borderRadius:6}}>
+        <div style={{background:"#ffe4e6",border:"1px solid #ffb4bb",padding:8,borderRadius:6, marginBottom:12}}>
           {errors.general}
         </div>
       )}
 
-      <form onSubmit={submit} style={{display:"grid",gap:10,gridTemplateColumns:"repeat(2,1fr)"}}>
-        <label style={{gridColumn:"span 2"}}>Título *
+      <form onSubmit={submit} style={{
+        display:"grid",
+        gap:12,
+        gridTemplateColumns:"repeat(12, 1fr)"
+      }}>
+        {/* Título */}
+        <div style={{gridColumn:"1 / span 12"}}>
+          <label style={{display:"block", marginBottom:6}}>Título</label>
           <input
             value={f.titulo}
             onKeyDown={onKeyDownTitulo}
             onPaste={onPasteSanitize}
             onChange={(e)=>setF(s=>({...s,titulo:e.target.value}))}
+            placeholder="Edita el título del convenio…"
           />
           {errors.titulo && <div style={{color:"#b91c1c"}}>{errors.titulo}</div>}
-        </label>
+        </div>
 
-        <label>Estado
+        {/* Estado */}
+        <div style={{gridColumn:"1 / span 4", minWidth:220}}>
+          <label style={{display:"block", marginBottom:6}}>Estado</label>
           <select value={f.estado} onChange={(e)=>setF(s=>({...s,estado:e.target.value}))}>
             {ESTADOS.map((e)=> <option key={e} value={e}>{e}</option>)}
           </select>
-        </label>
+        </div>
 
-        <div></div>
-
-        <label style={{gridColumn:"span 2"}}>Descripción
-          <textarea rows={3} value={f.descripcion}
-            onChange={(e)=>setF(s=>({...s,descripcion:e.target.value}))} />
-          {errors.descripcion && <div style={{color:"#b91c1c"}}>{errors.descripcion}</div>}
-        </label>
-
-        <label>Fecha firma
+        {/* Fechas */}
+        <div style={{gridColumn:"5 / span 4", minWidth:220}}>
+          <label style={{display:"block", marginBottom:6}}>Fecha firma</label>
           <input type="date" value={f.fecha_firma}
             onChange={(e)=>setF(s=>({...s,fecha_firma:e.target.value}))} />
           {errors.fecha_firma && <div style={{color:"#b91c1c"}}>{errors.fecha_firma}</div>}
-        </label>
+        </div>
 
-        <label>Fecha vencimiento
+        <div style={{gridColumn:"9 / span 4", minWidth:220}}>
+          <label style={{display:"block", marginBottom:6}}>Fecha vencimiento</label>
           <input type="date" value={f.fecha_vencimiento}
             onChange={(e)=>setF(s=>({...s,fecha_vencimiento:e.target.value}))} />
           {errors.fecha_vencimiento && <div style={{color:"#b91c1c"}}>{errors.fecha_vencimiento}</div>}
-        </label>
+        </div>
 
-        <label style={{gridColumn:"span 2"}}>Reemplazar archivo (PDF/DOCX)
+        {/* Descripción */}
+        <div style={{gridColumn:"1 / span 12"}}>
+          <label style={{display:"block", marginBottom:6}}>Descripción</label>
+          <textarea rows={4} value={f.descripcion}
+            placeholder="Actualiza los detalles del convenio…"
+            onChange={(e)=>setF(s=>({...s,descripcion:e.target.value}))} />
+          {errors.descripcion && <div style={{color:"#b91c1c"}}>{errors.descripcion}</div>}
+        </div>
+
+        {/* Archivo */}
+        <div style={{gridColumn:"1 / span 12"}}>
+          <label style={{display:"block", marginBottom:6}}>Reemplazar archivo (PDF/DOCX)</label>
           <input type="file" accept=".pdf,.docx" onChange={(e)=>setArchivo(e.target.files?.[0]||null)} />
+          <div style={{fontSize:12, opacity:.8, marginTop:4}}>Deja vacío si no quieres reemplazar el archivo actual.</div>
           {errors.archivo && <div style={{color:"#b91c1c"}}>{errors.archivo}</div>}
-        </label>
+        </div>
 
-        <div style={{gridColumn:"span 2"}}><button disabled={loading}>Guardar cambios</button></div>
+        {/* Acciones */}
+        <div style={{gridColumn:"1 / span 12", display:"flex", justifyContent:"flex-end", gap:8, marginTop:4}}>
+          <button type="submit" className="btn" style={loading ? BTN.saveDis : BTN.save} disabled={loading}>
+            {loading ? "Guardando…" : "Guardar cambios"}
+          </button>
+        </div>
       </form>
     </div>
   );

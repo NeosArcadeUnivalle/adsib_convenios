@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import api from "../api";
 
-const ESTADOS = ["BORRADOR","NEGOCIACION","VIGENTE","SUSPENDIDO","VENCIDO","RESCINDIDO","CERRADO"];
+const ESTADOS = ["BORRADOR","NEGOCIACION","VIGENTE","SUSPENDIDO","RESCINDIDO","CERRADO"];
 
 // Regex unicode con fallback
 let tituloAllowedRe, stripNotAllowedRe;
@@ -13,6 +13,12 @@ try {
   tituloAllowedRe = /^[A-Za-zÀ-ÿ0-9\s._,:()/-]+$/;
   stripNotAllowedRe = /[^A-Za-zÀ-ÿ0-9\s._,:()/-]+/g;
 }
+
+/* Paleta local para este formulario (sin modificar AppShell.css) */
+const BTN = {
+  back:   { background:"#374151", borderColor:"#4b5563", color:"#e5e7eb" }, // gris
+  create: { background:"#1a7927ff", borderColor:"#15803d", color:"#fff" },     // verde
+};
 
 export default function ConvenioCreate(){
   const nav = useNavigate();
@@ -70,7 +76,7 @@ export default function ConvenioCreate(){
 
     const fd = new FormData();
     fd.append("titulo", f.titulo.trim());
-    fd.append("estado", f.estado); // 👈 importante
+    fd.append("estado", f.estado);
     if(f.descripcion)       fd.append("descripcion", f.descripcion);
     if(f.fecha_firma)       fd.append("fecha_firma", f.fecha_firma);
     if(f.fecha_vencimiento) fd.append("fecha_vencimiento", f.fecha_vencimiento);
@@ -89,61 +95,90 @@ export default function ConvenioCreate(){
   };
 
   return (
-    <div style={{padding:16, maxWidth:800, margin:"0 auto"}}>
-      <Link to="/">← Volver</Link>
-      <h2>Nuevo Convenio</h2>
+    <div className="card" style={{ padding:20 }}>
+      {/* Header: Volver + Título */}
+      <div style={{
+        display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14
+      }}>
+        <Link to="/" className="btn" style={BTN.back}>Volver</Link>
+        <h2 style={{margin:0}}>Nuevo Convenio</h2>
+        <span /> {/* hueco para balancear el flex */}
+      </div>
 
       {errors.general && (
-        <div style={{background:"#ffe4e6",border:"1px solid #ffb4bb",padding:8,borderRadius:6}}>
+        <div style={{background:"#ffe4e6",border:"1px solid #ffb4bb",padding:8,borderRadius:6, marginBottom:12}}>
           {errors.general}
         </div>
       )}
 
-      <form onSubmit={submit} style={{display:"grid",gap:10,gridTemplateColumns:"repeat(2,1fr)"}}>
-        <label style={{gridColumn:"span 2"}}>Título *
+      {/* Formulario en grid compacto y ordenado */}
+      <form onSubmit={submit} style={{
+        display:"grid",
+        gap:12,
+        gridTemplateColumns:"repeat(12, 1fr)"
+      }}>
+        {/* Título */}
+        <div style={{gridColumn:"1 / span 12"}}>
+          <label style={{display:"block", marginBottom:6}}>Título</label>
           <input
             value={f.titulo}
             onKeyDown={onKeyDownTitulo}
             onPaste={onPasteSanitize}
             onChange={(e)=>setF(s=>({...s,titulo:e.target.value}))}
+            placeholder="Escribe un título descriptivo…"
           />
           {errors.titulo && <div style={{color:"#b91c1c"}}>{errors.titulo}</div>}
-        </label>
+        </div>
 
-        <label>Estado
+        {/* Estado */}
+        <div style={{gridColumn:"1 / span 4", minWidth:220}}>
+          <label style={{display:"block", marginBottom:6}}>Estado</label>
           <select value={f.estado} onChange={(e)=>setF(s=>({...s,estado:e.target.value}))}>
             {ESTADOS.map((e)=> <option key={e} value={e}>{e}</option>)}
           </select>
           {errors.estado && <div style={{color:"#b91c1c"}}>{errors.estado}</div>}
-        </label>
+        </div>
 
-        <div></div>
-
-        <label style={{gridColumn:"span 2"}}>Descripción
-          <textarea rows={3} value={f.descripcion}
-            onChange={(e)=>setF(s=>({...s,descripcion:e.target.value}))} />
-          {errors.descripcion && <div style={{color:"#b91c1c"}}>{errors.descripcion}</div>}
-        </label>
-
-        <label>Fecha firma
+        {/* Fechas */}
+        <div style={{gridColumn:"5 / span 4", minWidth:220}}>
+          <label style={{display:"block", marginBottom:6}}>Fecha firma</label>
           <input type="date" value={f.fecha_firma}
             onChange={(e)=>setF(s=>({...s,fecha_firma:e.target.value}))} />
           {errors.fecha_firma && <div style={{color:"#b91c1c"}}>{errors.fecha_firma}</div>}
-        </label>
+        </div>
 
-        <label>Fecha vencimiento
+        <div style={{gridColumn:"9 / span 4", minWidth:220}}>
+          <label style={{display:"block", marginBottom:6}}>Fecha vencimiento</label>
           <input type="date" value={f.fecha_vencimiento}
             onChange={(e)=>setF(s=>({...s,fecha_vencimiento:e.target.value}))} />
           {errors.fecha_vencimiento && <div style={{color:"#b91c1c"}}>{errors.fecha_vencimiento}</div>}
-        </label>
+        </div>
 
-        <label style={{gridColumn:"span 2"}}>Archivo (PDF/DOCX)
+        {/* Descripción */}
+        <div style={{gridColumn:"1 / span 12"}}>
+          <label style={{display:"block", marginBottom:6}}>Descripción</label>
+          <textarea rows={4} value={f.descripcion}
+            placeholder="Detalles breves del convenio (opcional)…"
+            onChange={(e)=>setF(s=>({...s,descripcion:e.target.value}))} />
+          {errors.descripcion && <div style={{color:"#b91c1c"}}>{errors.descripcion}</div>}
+        </div>
+
+        {/* Archivo */}
+        <div style={{gridColumn:"1 / span 12"}}>
+          <label style={{display:"block", marginBottom:6}}>Archivo (PDF/DOCX)</label>
           <input type="file" accept=".pdf,.docx"
             onChange={(e)=>setArchivo(e.target.files?.[0]||null)} />
+          <div style={{fontSize:12, opacity:.8, marginTop:4}}>Formatos permitidos: PDF o DOCX. Tamaño máximo: 20 MB.</div>
           {errors.archivo && <div style={{color:"#b91c1c"}}>{errors.archivo}</div>}
-        </label>
+        </div>
 
-        <div style={{gridColumn:"span 2"}}><button>Crear</button></div>
+        {/* Acciones */}
+        <div style={{
+          gridColumn:"1 / span 12",
+          display:"flex", justifyContent:"flex-end", gap:8, marginTop:4
+        }}>
+          <button type="submit" className="btn" style={BTN.create}>Crear</button>
+        </div>
       </form>
     </div>
   );

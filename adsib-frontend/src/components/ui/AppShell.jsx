@@ -1,29 +1,56 @@
-import { Link, Outlet, useNavigate } from "react-router-dom";
-import NotificationsBell from "./NotificationsBell";
-import { clearToken } from "../../api";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import api, { clearToken } from "../../api";
+import "./AppShell.css";
 
 export default function AppShell() {
   const nav = useNavigate();
-  const logout = () => { try { /* opcional: await api.post('/auth/logout') */ } finally { clearToken(); nav("/login"); } };
+  const { pathname } = useLocation();
+  const [collapsed, setCollapsed] = useState(false);
+
+  const logout = async () => {
+    try { await api.post("/auth/logout"); } catch {}
+    clearToken();
+    nav("/login");
+  };
 
   return (
-    <div>
-      <header style={{
-        display:"flex", justifyContent:"space-between", alignItems:"center",
-        padding:"10px 16px", borderBottom:"1px solid #eee", position:"sticky", top:0, background:"#fff", zIndex:10
-      }}>
-        <div style={{display:"flex", alignItems:"center", gap:12}}>
-          <Link to="/" style={{ textDecoration:"none", fontWeight:700 }}>📁 Convenios</Link>
-          <Link to="/convenios/nuevo">+ Nuevo</Link>
-          <Link to="/usuarios">Usuarios</Link> {/* ⬅️ nuevo */}
-        </div>
-        <div style={{display:"flex", alignItems:"center", gap:16}}>
-          <NotificationsBell />
-          <button onClick={logout}>Salir</button>
-        </div>
-      </header>
+    <div className={`layout ${collapsed ? "is-collapsed" : ""}`}>
+      <aside className="sidebar">
+        <button
+          className="brand"
+          type="button"
+          title="Mostrar/ocultar menú"
+          onClick={() => setCollapsed(v => !v)}
+        >
+          <img src="/adsib.jpg" alt="ADSIB" />
+          {!collapsed && <span className="brand-text">ADSIB</span>}
+        </button>
 
-      <main>
+        <nav className="nav">
+          <Link className={`nav-link ${pathname === "/" ? "active" : ""}`} to="/">
+            <span className="icon">📄</span>
+            <span className="text">Convenios</span>
+          </Link>
+
+          <Link className={`nav-link ${pathname.startsWith("/usuarios") ? "active" : ""}`} to="/usuarios">
+            <span className="icon">👤</span>
+            <span className="text">Usuarios</span>
+          </Link>
+
+          <Link className={`nav-link ${pathname.startsWith("/notificaciones") ? "active" : ""}`} to="/notificaciones">
+            <span className="icon">🔔</span>
+            <span className="text">Notificaciones</span>
+          </Link>
+        </nav>
+
+        <button className="nav-link logout" type="button" onClick={logout}>
+          <span className="icon">⎋</span>
+          <span className="text">Salir</span>
+        </button>
+      </aside>
+
+      <main className="content">
         <Outlet />
       </main>
     </div>

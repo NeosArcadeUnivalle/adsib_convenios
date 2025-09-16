@@ -1,4 +1,3 @@
-// src/pages/ConveniosList.js
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../api";
@@ -20,29 +19,35 @@ const daysLeft = (dateStr) => {
 const fmtDate = (s) => (s ? String(s).slice(0,10) : "—");
 
 const BadgeVence = ({ date }) => {
-  const d = daysLeft(date); 
+  const d = daysLeft(date);
   if (d === null) return <span>—</span>;
   let bg = "#817f00ff", txt = `${d}d`;
   if (d < 0)     { bg = "#c90000ff"; txt = `Vencido ${Math.abs(d)}d`; }
   else if (d === 0) { bg = "#c90000ff"; txt = "Vencido hoy"; }
-  else if (d <= 30) { bg = "#817f00ff"; }
-  else if (d <= 60) { bg = "#817f00ff"; }
-  else              { bg = "#817f00ff"; }
-  return <span style={{ padding: "2px 6px", borderRadius: 6, background: bg }}>{txt}</span>;
+  return <span style={{ padding:"2px 6px", borderRadius:6, background:bg }}>{txt}</span>;
 };
 
-const ESTADOS = ["BORRADOR","NEGOCIACION","VIGENTE","SUSPENDIDO","VENCIDO","RESCINDIDO","CERRADO"];
+const ESTADOS = ["BORRADOR","NEGOCIACION","VIGENTE","SUSPENDIDO","RESCINDIDO","CERRADO"];
+
+/* ===== Colores de botones (solo aquí) ===== */
+const BTN = {
+  info:   { background:"#0ea5e9", borderColor:"#0284c7", color:"#fff" },
+  warn:   { background:"#f59e0b", borderColor:"#b45309", color:"#1f2937" },
+  danger: { background:"#ef4444", borderColor:"#b91c1c", color:"#fff" },
+  clean:  { background:"#1a6779", borderColor:"#125463", color:"#fff" },
+  success:{ background:"#1a7927ff", borderColor:"#15803d", color:"#fff" }, // Nuevo convenio
+};
 
 export default function ConveniosList() {
   const [rows, setRows] = useState([]);
   const [meta, setMeta] = useState({ last_page: 1 });
   const [f, setF] = useState({
-    q: "", estado: "",
-    fi_from: "", fi_to: "",
-    fv_from: "", fv_to: "",
-    prox30: false,
-    sort: "fecha_vencimiento", dir: "asc",
-    page: 1, per_page: 10,
+    q:"", estado:"",
+    fi_from:"", fi_to:"",
+    fv_from:"", fv_to:"",
+    prox30:false,
+    sort:"fecha_vencimiento", dir:"asc",
+    page:1, per_page:5,            // 5 por página
   });
 
   const qs = useMemo(() => {
@@ -83,7 +88,7 @@ export default function ConveniosList() {
   const limpiarFiltros = () =>
     setF((s) => ({ ...s,
       q: "", estado: "", fi_from: "", fi_to: "", fv_from: "", fv_to: "",
-      prox30: false, page: 1, sort: "fecha_vencimiento", dir: "asc", per_page: 10,
+      prox30: false, page: 1, sort: "fecha_vencimiento", dir: "asc", per_page: 5,
     }));
 
   const eliminar = async (id) => {
@@ -97,60 +102,85 @@ export default function ConveniosList() {
   };
 
   return (
-    <div className="container">
-      <h2>Convenios</h2>
+    <div>
+      <style>{`
+        .row-danger td { background: rgba(220,38,38,.15) !important; }
+      `}</style>
+
+      <h2 style={{marginBottom:12}}>Convenios</h2>
+
+      {/* Toolbar: botón para crear nuevo */}
+      <div style={{display:"flex", justifyContent:"flex-end", margin:"0 0 10px 0"}}>
+        <Link className="btn" style={BTN.success} to="/convenios/nuevo">
+          Nuevo Convenio
+        </Link>
+      </div>
 
       {/* Filtros */}
-      <div className="toolbar" style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(6,1fr)", margin: "8px 0 12px" }}>
-        <input
-          className="input"
-          placeholder="Buscar por título o descripción..."
-          value={f.q}
-          onChange={(e) => setF((s) => ({ ...s, q: e.target.value, page: 1 }))}
-          style={{ gridColumn: "span 2" }}
-        />
+      <div className="card">
+        <div className="filters">
+          <input
+            className="input full"
+            placeholder="Buscar por título o descripción..."
+            value={f.q}
+            onChange={(e)=>setF(s=>({...s, q:e.target.value, page:1}))}
+          />
 
-        <select className="select" value={f.estado} onChange={(e)=>setF(s=>({...s, estado: e.target.value, page:1}))}>
-          <option value="">Todos los estados</option>
-          {ESTADOS.map((e)=> <option key={e} value={e}>{e}</option>)}
-        </select>
+          <select className="select" value={f.estado} onChange={(e)=>setF(s=>({...s, estado:e.target.value, page:1}))}>
+            <option value="">Todos los estados</option>
+            {ESTADOS.map((e)=> <option key={e} value={e}>{e}</option>)}
+          </select>
 
-        <select className="select" value={f.sort} onChange={(e) => setF((s) => ({ ...s, sort: e.target.value }))}>
-          <option value="fecha_vencimiento">Ordenar por Vencimiento</option>
-          <option value="fecha_firma">Ordenar por Firma</option>
-          <option value="titulo">Ordenar por Título</option>
-          <option value="updated_at">Ordenar por Actualizado</option>
-        </select>
+          <select className="select" value={f.sort} onChange={(e)=>setF(s=>({...s, sort:e.target.value}))}>
+            <option value="fecha_vencimiento">Ordenar por Vencimiento</option>
+            <option value="fecha_firma">Ordenar por Firma</option>
+            <option value="titulo">Ordenar por Título</option>
+            <option value="updated_at">Ordenar por Actualizado</option>
+          </select>
 
-        <select className="select" value={f.dir} onChange={(e) => setF((s) => ({ ...s, dir: e.target.value }))}>
-          <option value="asc">Asc</option>
-          <option value="desc">Desc</option>
-        </select>
+          <select className="select" value={f.dir} onChange={(e)=>setF(s=>({...s, dir:e.target.value}))}>
+            <option value="asc">Asc</option>
+            <option value="desc">Desc</option>
+          </select>
 
-        <input
-          className="input"
-          type="number" min={1} max={100} value={f.per_page}
-          onChange={(e) => setF((s) => ({ ...s, per_page: +e.target.value || 10, page: 1 }))}
-        />
+          <label>
+            Firma de:
+            <input className="input" type="date" value={f.fi_from}
+              onChange={(e)=>setF(s=>({...s, fi_from:e.target.value, page:1}))}/>
+          </label>
 
-        <div>Firma de: <input className="input" type="date" value={f.fi_from} onChange={(e) => setF((s) => ({ ...s, fi_from: e.target.value, page: 1 }))} /></div>
-        <div>Firma a:   <input className="input" type="date" value={f.fi_to}   onChange={(e) => setF((s) => ({ ...s, fi_to: e.target.value, page: 1 }))} /></div>
-        <div>Vence de:  <input className="input" type="date" value={f.fv_from} onChange={(e) => setF((s) => ({ ...s, fv_from: e.target.value, prox30:false, page: 1 }))} /></div>
-        <div>Vence a:   <input className="input" type="date" value={f.fv_to}   onChange={(e) => setF((s) => ({ ...s, fv_to: e.target.value, prox30:false, page: 1 }))} /></div>
+          <label>
+            Firma a:
+            <input className="input" type="date" value={f.fi_to}
+              onChange={(e)=>setF(s=>({...s, fi_to:e.target.value, page:1}))}/>
+          </label>
 
-        <label style={{ gridColumn: "span 2", display: "flex", alignItems: "center", gap: 8 }}>
-          <input type="checkbox" checked={f.prox30} onChange={toggleProx30} />
-          Solo próximos a vencer (≤ 30 días)
-        </label>
+          <label>
+            Vence de:
+            <input className="input" type="date" value={f.fv_from}
+              onChange={(e)=>setF(s=>({...s, fv_from:e.target.value, prox30:false, page:1}))}/>
+          </label>
 
-        <div style={{ gridColumn: "span 6", display: "flex", gap: 8 }}>
-          <button className="btn" onClick={limpiarFiltros}>Limpiar filtros</button>
+          <label>
+            Vence a:
+            <input className="input" type="date" value={f.fv_to}
+              onChange={(e)=>setF(s=>({...s, fv_to:e.target.value, prox30:false, page:1}))}/>
+          </label>
+
+          <label className="full" style={{display:"flex", alignItems:"center", gap:8}}>
+            <input type="checkbox" checked={f.prox30} onChange={toggleProx30}/>
+            Solo próximos a vencer (≤ 30 días)
+          </label>
+
+          <div className="full" style={{display:"flex", justifyContent:"flex-end"}}>
+            <button className="btn" style={BTN.clean} onClick={limpiarFiltros}>Limpiar filtros</button>
+          </div>
         </div>
       </div>
 
       {/* Tabla */}
-      <div className="card">
-        <table className="table">
+      <div className="card" style={{ overflowX: "auto" }}>
+        <table className="table" style={{ minWidth: 900 }}>
           <thead>
             <tr>
               <th align="left">Título</th>
@@ -165,9 +195,9 @@ export default function ConveniosList() {
           <tbody>
             {rows.map((r) => {
               const d = daysLeft(r.fecha_vencimiento);
-              const resaltado = (d !== null && d <= 0) ? "#3a0000ff" : undefined;
+              const isVencido = (d !== null && d <= 0);
               return (
-                <tr key={r.id} style={{ background: resaltado }}>
+                <tr key={r.id} className={isVencido ? "row-danger" : undefined}>
                   <td>{r.titulo}</td>
                   <td>{r.descripcion?.slice(0, 60) || "—"}</td>
                   <td align="center">{r.estado || "—"}</td>
@@ -175,9 +205,9 @@ export default function ConveniosList() {
                   <td align="center"><BadgeVence date={r.fecha_vencimiento} /></td>
                   <td align="center">{r.archivo_nombre_original ? "Sí" : "—"}</td>
                   <td style={{whiteSpace:"nowrap"}}>
-                    <Link to={`/convenios/${r.id}`}>Ver</Link>{" "}
-                    <Link to={`/convenios/${r.id}/editar`}>Editar</Link>{" "}
-                    <button className="btn btn-danger" onClick={() => eliminar(r.id)} style={{marginLeft:4}}>Eliminar</button>
+                    <Link className="btn" style={BTN.info} to={`/convenios/${r.id}`}>Ver</Link>{" "}
+                    <Link className="btn" style={BTN.warn} to={`/convenios/${r.id}/editar`}>Editar</Link>{" "}
+                    <button className="btn" style={BTN.danger} onClick={()=>eliminar(r.id)}>Eliminar</button>
                   </td>
                 </tr>
               );
@@ -189,11 +219,15 @@ export default function ConveniosList() {
         </table>
       </div>
 
-      {/* Paginación */}
-      <div className="toolbar" style={{ justifyContent:"center" }}>
-        <button className="btn" disabled={f.page <= 1} onClick={() => setF((s) => ({ ...s, page: s.page - 1 }))}>Anterior</button>
-        <span style={{padding:"0 10px"}}>Página {f.page} / {meta.last_page}</span>
-        <button className="btn" disabled={f.page >= meta.last_page} onClick={() => setF((s) => ({ ...s, page: s.page + 1 }))}>Siguiente</button>
+      {/* Paginación (5 por página) */}
+      <div className="card" style={{display:"flex", gap:8, justifyContent:"center", alignItems:"center"}}>
+        <button className="btn" onClick={()=>setF(s=>({...s, page:s.page-1}))} disabled={f.page <= 1}>
+          Anterior
+        </button>
+        <span>Página {f.page} / {meta.last_page}</span>
+        <button className="btn" onClick={()=>setF(s=>({...s, page:s.page+1}))} disabled={f.page >= meta.last_page}>
+          Siguiente
+        </button>
       </div>
     </div>
   );

@@ -1,0 +1,144 @@
+/* ================== BASE / RESET ================== */
+:root { --sbw: 220px; }              /* ancho del sidebar: una sola fuente */
+html, body, #root { height: 100%; }
+body { margin: 0; padding: 0; overflow-x: hidden; }
+*, *::before, *::after { box-sizing: border-box; }
+
+/* Simple.css centra/limita; aquí lo anulamos en elementos comunes */
+main, section, article, form, fieldset {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+.layout { display: flex; min-height: 100vh; }
+
+/* ================== SIDEBAR ================== */
+.sidebar{
+  color: #0d839bff;
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  width: var(--sbw); min-width: var(--sbw); max-width: var(--sbw);
+  margin: 0 !important;
+  padding: 12px 10px;
+  background: #161616;
+  border: none !important;
+  border-right: 1px solid rgba(255,255,255,.08);
+  outline: none !important;
+  box-shadow: none !important;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ================== CONTENT ================== */
+/* ¡Clave!: empieza tras el sidebar y ocupa exactamente el resto del viewport */
+.layout .content{
+  font-size: 16px;
+  display: block;
+  margin: 0 !important;
+  margin-left: -50px !important;        /* arranca después del sidebar */
+  width: calc(100vw - var(--sbw)) !important;/* ocupa el resto del viewport */
+  min-width: 1050px !important;                   /* evita empujes/recortes */
+  max-width: none !important;
+  padding: 16px clamp(10px, 1.8vw, 20px);
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+/* hijos del content siempre pegados a la izquierda y sin límites */
+.layout .content > *{
+  width: 100% !important;
+  max-width: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+/* por si Simple.css intenta limitar otra vez en niveles internos */
+.layout .content :where(main, section, article, form, fieldset){
+  width: 100% !important;
+  max-width: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+/* contenedores habituales dentro del content */
+.layout .content > :where(.card, .container, .toolbar, table){
+  width: 100% !important;
+  max-width: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+/* ================== BRAND ================== */
+.brand{
+  display:flex; align-items:center; gap:10px; padding:8px;
+  border-radius:10px; border:1px solid transparent; background:transparent;
+  color:inherit; cursor: default; pointer-events: none;
+}
+.brand:hover{ background: transparent; }
+.brand img{
+  width:42px; height:42px; border-radius:50%; object-fit:cover;
+  border:2px solid #1a6779ff;
+}
+.brand-text{ font-weight:700; letter-spacing:.3px; }
+
+/* ================== NAV ================== */
+.nav{ display:flex; flex-direction:column; gap:6px; margin-top:6px; }
+.nav-link{
+  display:flex; align-items:center; gap:10px; padding:10px 12px;
+  border-radius:10px; text-decoration:none; color:inherit;
+  border:1px solid transparent; background:transparent;
+}
+.nav-link:hover{ background:rgba(255,255,255,.06); }
+.nav-link.active{ background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.14); }
+.nav-link .icon{ width:24px; text-align:center; }
+
+/* botón salir abajo */
+.nav-link.logout{ margin-top:auto; background:#8b0000; color:#fff; border:1px solid #a00000; }
+.nav-link.logout:hover{ background:#a40000; }
+
+/* ================== UI REUTILIZABLE ================== */
+.card{
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(0,0,0,.22);
+  padding:16px;
+  border-radius:12px;
+  top: 0; left: 0; bottom: 0;
+  margin: 0 0 16px 0 !important;  /* pegado a la izquierda */
+  width: 100% !important;
+  max-width: none !important;
+  overflow-x: auto;               /* si algo es muy ancho, scroll local */
+}
+.table{ width:100%; border-collapse:collapse; }
+.table th, .table td{ padding:10px; border-top:1px solid rgba(255,255,255,.08); }
+.table thead th{ border-top:none; }
+.tr-danger{ background:rgba(220,38,38,.15); }
+
+/* ===== Botones (paleta refinada) ===== */
+/* base del botón: sin colores aquí */
+.btn{
+  display:inline-block;
+  padding:6px 12px;
+  border-radius:8px;
+  border:1px solid transparent;
+  text-decoration:none;
+  font-weight:700;
+  line-height:1;
+  transition:filter .15s ease, transform .02s ease;
+}
+.btn:hover{ filter:brightness(1.06); }
+.btn:active{ transform:translateY(1px); }
+
+/* filtros responsivos */
+.filters{
+  display:grid; gap:10px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+.filters .full{ grid-column: 1 / -1; }
+
+/* ====== opcional: comportamiento en móviles si ocultas el sidebar ====== */
+@media (max-width: 860px){
+  :root{ --sbw: 0px; }
+  /* si en móvil deslizas el menú, puedes mover el aside, pero el content seguirá ocupando 100vw */
+  /* .sidebar{ transform: translateX(-100%); } */
+}
