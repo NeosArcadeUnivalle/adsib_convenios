@@ -8,6 +8,10 @@ use App\Http\Controllers\VersionController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\NotificationsController;
 use App\Http\Controllers\UsuarioController;
+use App\Http\Controllers\AnalisisController;
+
+Route::post('/analisis/riesgo', [AnalisisController::class, 'riesgo']);
+Route::post('/analisis/riesgo', [\App\Http\Controllers\NlpController::class, 'analyze']);
 
 Route::apiResource('usuarios', UsuarioController::class)->parameters([
     'usuarios' => 'id'

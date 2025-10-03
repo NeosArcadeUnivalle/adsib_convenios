@@ -13,6 +13,7 @@ import ConvenioEdit from "./pages/ConvenioEdit";
 import ConvenioComparar from "./pages/ConvenioComparar";
 import NotificacionesPage from "./pages/NotificacionesPage";
 import Login from "./pages/Login";
+import ConvenioRiesgo from "./pages/ConvenioRiesgo";
 
 // 👇 NUEVO: páginas de Usuarios
 import UsersList from "./pages/UsersList";
@@ -34,7 +35,7 @@ root.render(
           <Route path="/convenios/:id" element={<ConvenioDetalle />} />
           <Route path="/convenios/:id/editar" element={<ConvenioEdit />} />
           <Route path="/convenios/:id/comparar" element={<ConvenioComparar />} />
-
+          <Route path="/convenios/:id/riesgo" element={<ConvenioRiesgo />} />
           {/* Notificaciones */}
           <Route path="/notificaciones" element={<NotificacionesPage />} />
 

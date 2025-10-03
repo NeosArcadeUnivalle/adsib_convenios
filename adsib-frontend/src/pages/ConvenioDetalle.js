@@ -17,11 +17,11 @@ const fmtDate = (v) => {
 /* --------- estilos locales de botones (no toca AppShell.css) --------- */
 const BTN = {
   back:     { background:"#374151", borderColor:"#4b5563", color:"#e5e7eb" },
-  info:     { background:"#0ea5e9", borderColor:"#0284c7", color:"#fff" },
+  info:     { background:"#0ea5e9", borderColor:"#0284c7", color:"#fff" },      // Análisis de riesgo
+  action:   { background:"#1a6779", borderColor:"#125463", color:"#fff" },      // Abrir comparador
   warn:     { background:"#eab308", borderColor:"#a16207", color:"#1f2937" },
   danger:   { background:"#dc2626", borderColor:"#b91c1c", color:"#fff" },
   dark:     { background:"#111827", borderColor:"#1f2937", color:"#e5e7eb" },
-  action:   { background:"#1a6779", borderColor:"#125463", color:"#fff" }, // para “Abrir comparador”
   disabled: { opacity:.7, cursor:"not-allowed" },
 };
 
@@ -129,15 +129,30 @@ export default function ConvenioDetalle() {
 
   return (
     <div className="card" style={{ padding:20 }}>
-      {/* Header con botón Volver, título y acción */}
+      {/* Header con botón Volver, título y acciones */}
       <div style={{display:"grid", gridTemplateColumns:"1fr auto", alignItems:"center", gap:10}}>
+        {/* Izquierda: volver + título */}
         <div style={{display:"flex", gap:8, alignItems:"center"}}>
           <Link to="/" className="btn" style={BTN.back}>Volver</Link>
           <h2 style={{margin:0}}>{c?.titulo || "..."}</h2>
         </div>
-        <button className="btn" style={BTN.action} onClick={()=>nav(`/convenios/${id}/comparar`)}>
-          Abrir comparador
-        </button>
+        {/* Derecha: acciones alineadas */}
+        <div style={{display:"flex", gap:8}}>
+          <button
+            onClick={()=>nav(`/convenios/${id}/riesgo`)}
+            className="btn"
+            style={BTN.action}
+          >
+            Análisis de riesgo
+          </button>
+          <button
+            className="btn"
+            style={BTN.action}
+            onClick={()=>nav(`/convenios/${id}/comparar`)}
+          >
+            Comparador
+          </button>
+        </div>
       </div>
 
       {/* Meta del convenio */}
@@ -205,7 +220,7 @@ export default function ConvenioDetalle() {
             style={{...BTN.info, ...( !vFile || loading ? BTN.disabled : {})}}
             disabled={!vFile || loading}
           >
-            + Nueva versión
+            Nueva versión
           </button>
         </form>
 

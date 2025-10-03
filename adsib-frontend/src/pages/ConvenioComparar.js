@@ -12,9 +12,7 @@ const pageFromLine = (line) => {
   return m ? parseInt(m[2], 10) : null;
 };
 
-/**
- * Diff a NIVEL DE LÍNEA, estable y sin APIs privadas de DMP.
- */
+/** Diff a NIVEL DE LÍNEA */
 function buildLineDiff(aText = "", bText = "") {
   const dmp = new DiffMatchPatch();
   const diffs = dmp.diff_main(aText, bText);
@@ -42,12 +40,10 @@ function buildLineDiff(aText = "", bText = "") {
   return rows;
 }
 
-/* ===== estilos locales de botones (sin tocar AppShell.css) ===== */
+/* ===== estilos locales de botones ===== */
 const BTN = {
   back:   { background:"#374151", borderColor:"#4b5563", color:"#e5e7eb" },
   action: { background:"#1a6779", borderColor:"#125463", color:"#fff" },
-  info:   { background:"#0ea5e9", borderColor:"#0284c7", color:"#fff" },
-  warn:   { background:"#eab308", borderColor:"#a16207", color:"#1f2937" },
   dark:   { background:"#111827", borderColor:"#1f2937", color:"#e5e7eb" },
   disabled: { opacity:.7, cursor:"not-allowed" },
 };
@@ -108,7 +104,6 @@ export default function ConvenioComparar() {
       const rs = buildLineDiff(textA, textB);
       setRows(rs);
       setCur(0);
-      // scroll al primer match si existe
       setTimeout(() => {
         if (matches.length > 0 && containerRef.current) {
           const el = containerRef.current.querySelector(`[data-row="${matches[0]}"]`);
@@ -193,9 +188,12 @@ export default function ConvenioComparar() {
       {/* Resultado */}
       <div className="card" style={{marginTop:10}}>
         <div ref={containerRef} style={{maxHeight:480, overflow:"auto"}}>
-          <table className="table" style={{minWidth: 820, borderCollapse:"collapse",
-                                           fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-                                           fontSize:13}}>
+          <table className="table" style={{
+            minWidth: 820,
+            borderCollapse:"collapse",
+            fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+            fontSize:13
+          }}>
             <thead style={{position:"sticky", top:0}}>
               <tr>
                 <th style={{width:70, textAlign:"right"}}>Pág A</th>
@@ -212,7 +210,10 @@ export default function ConvenioComparar() {
                 let text = escapeHtml(r.text || "");
                 if (q) {
                   const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")})`, "gi");
-                  text = text.replace(re, '<mark style="background:#f59e0b;color:#111827;border-radius:3px;padding:0 2px">$1</mark>');
+                  text = text.replace(
+                    re,
+                    '<mark style="background:#f59e0b;color:#111827;border-radius:3px;padding:0 2px">$1</mark>'
+                  );
                 }
                 return (
                   <tr key={i} data-row={i}

@@ -13,6 +13,9 @@ return [
     | a conventional file to locate the various service credentials.
     |
     */
+    'nlp_risk' => [
+        'base_url' => env('NLP_RISK_URL', 'http://127.0.0.1:8001'),
+    ],
 
     'mailgun' => [
         'domain' => env('MAILGUN_DOMAIN'),
