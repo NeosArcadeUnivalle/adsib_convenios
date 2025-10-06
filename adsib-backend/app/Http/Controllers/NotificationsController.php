@@ -10,7 +10,6 @@ use Carbon\Carbon;
 
 class NotificationsController extends Controller
 {
-    // Lista de notificaciones (con filtros) + convenio relacionado
     public function index(Request $r)
     {
         $per = (int) $r->get('per_page', 10);
@@ -31,7 +30,6 @@ class NotificationsController extends Controller
         return response()->json($q->paginate($per));
     }
 
-    // Marcar como leído/no leído
     public function markRead(Request $r, $id)
     {
         $n = Notificacion::findOrFail($id);
@@ -40,14 +38,12 @@ class NotificationsController extends Controller
         return response()->json($n);
     }
 
-    // Marcar todas como leídas
     public function markAllRead()
     {
         Notificacion::where('leido', false)->update(['leido' => true]);
         return response()->json(['ok'=>true]);
     }
 
-    // Eliminar
     public function destroy($id)
     {
         $n = Notificacion::findOrFail($id);
@@ -55,17 +51,23 @@ class NotificationsController extends Controller
         return response()->json(['ok'=>true]);
     }
 
-    // Sección "Convenios vencidos" para la parte superior del apartado
+    /** Listado de convenios vencidos (<= hoy, excluye null) */
     public function vencidos()
     {
-        $today = Carbon::today()->toDateString();
+        $hoy    = Carbon::today(config('app.timezone'))->toDateString();
+        $driver = DB::connection()->getDriverName();
 
-        // Solo campos necesarios
-        $rows = Convenio::select('id','titulo','estado','fecha_vencimiento')
-            ->whereDate('fecha_vencimiento', '<=', $today)
-            ->orderBy('fecha_vencimiento')
-            ->get();
+        $q = Convenio::select('id','titulo','estado','fecha_vencimiento')
+            ->whereNotNull('fecha_vencimiento');
 
-        return response()->json($rows);
+        if (in_array($driver, ['mysql','pgsql'])) {
+            $q->whereDate('fecha_vencimiento', '<=', $hoy);
+        } else {
+            $q->where('fecha_vencimiento', '<=', $hoy);
+        }
+
+        $rows = $q->orderBy('fecha_vencimiento', 'asc')->get();
+
+        return response()->json($rows, 200, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     }
 }

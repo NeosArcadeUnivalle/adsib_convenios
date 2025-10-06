@@ -1,4 +1,3 @@
-// src/pages/Login.js
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api, { setToken } from "../api";
@@ -9,7 +8,7 @@ export default function Login() {
   const nav = useNavigate();
   const [f, setF] = useState({ email: "", password: "" });
   const [err, setErr] = useState("");
-  const [hover, setHover] = useState(false); // <-- para el hover del botón
+  const [hover, setHover] = useState(false);
 
   const onKeyDownNoSpaces = (e) => {
     if (e.key === " " && e.target.selectionStart === 0) e.preventDefault();
@@ -25,13 +24,14 @@ export default function Login() {
     try {
       const { data } = await api.post("/auth/login", f);
       setToken(data.token);
+      // <<< Marca que acabas de iniciar sesión para abrir el popup
+      sessionStorage.setItem("just_logged_v2", "1");
       nav("/");
     } catch (er) {
       setErr(er.response?.data?.message || "No se pudo iniciar sesión.");
     }
   };
 
-  // ===== estilos mínimos y responsive =====
   const card = {
     width: "clamp(280px, 92vw, 440px)",
     margin: "min(8vh, 60px) auto",
@@ -47,10 +47,8 @@ export default function Login() {
     borderRadius: 8,
     marginBottom: 10,
   };
-
-  // botón celeste oscuro + hover más claro
   const btnStyle = {
-    background: hover ? "#0d839bff" : "#1a6779ff", // celeste oscuro -> más claro en hover
+    background: hover ? "#0d839bff" : "#1a6779ff",
     color: "#ffffff",
     border: "1px solid #0aa4caff",
     borderRadius: 8,
@@ -67,7 +65,6 @@ export default function Login() {
         Iniciar sesión
       </h2>
 
-      {/* Logo centrado y redondo. Coloca el archivo en /public/adsib.jpg */}
       <img
         src="/adsib.jpg"
         alt="ADSIB"
@@ -105,7 +102,7 @@ export default function Login() {
             type="password"
             value={f.password}
             onKeyDown={onKeyDownNoSpaces}
-            onChange={(e) => setF((s) => ({ ...s, password: e.target.value }))}
+            onChange={(e) => setF((s) => ({ ...s, password: e.target.value }))} 
             minLength={8}
             placeholder="••••••••"
             required

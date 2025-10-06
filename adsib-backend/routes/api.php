@@ -10,6 +10,10 @@ use App\Http\Controllers\NotificationsController;
 use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\AnalisisController;
 
+Route::get('/dashboard/overview', [DashboardController::class, 'overview']);
+
+Route::middleware('auth:sanctum')->get('/overview', [DashboardController::class, 'overview']);
+
 Route::post('/analisis/riesgo', [AnalisisController::class, 'riesgo']);
 Route::post('/analisis/riesgo', [\App\Http\Controllers\NlpController::class, 'analyze']);
 

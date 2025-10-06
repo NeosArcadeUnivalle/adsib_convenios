@@ -15,7 +15,7 @@ import NotificacionesPage from "./pages/NotificacionesPage";
 import Login from "./pages/Login";
 import ConvenioRiesgo from "./pages/ConvenioRiesgo";
 
-// 👇 NUEVO: páginas de Usuarios
+// Páginas de Usuarios
 import UsersList from "./pages/UsersList";
 import UserCreate from "./pages/UserCreate";
 import UserEdit from "./pages/UserEdit";
@@ -36,6 +36,7 @@ root.render(
           <Route path="/convenios/:id/editar" element={<ConvenioEdit />} />
           <Route path="/convenios/:id/comparar" element={<ConvenioComparar />} />
           <Route path="/convenios/:id/riesgo" element={<ConvenioRiesgo />} />
+
           {/* Notificaciones */}
           <Route path="/notificaciones" element={<NotificacionesPage />} />
 

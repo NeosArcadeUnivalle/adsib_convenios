@@ -175,16 +175,14 @@ class VersionController extends Controller
     {
         Convenio::findOrFail($convenioId);
 
-        $v = VersionConvenio::where('convenio_id', $convenioId)
-            ->orderByDesc('numero_version')
-            ->get();
+        $perPage = (int) request('per_page', 5);
+        $page    = (int) request('page', 1);
 
-        return response()->json(
-            $v,
-            200,
-            [],
-            JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
-        );
+        $paginator = VersionConvenio::where('convenio_id', $convenioId)
+            ->orderByDesc('numero_version')
+            ->paginate($perPage, ['*'], 'page', $page);
+
+        return response()->json($paginator, 200, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     }
 
     /**
