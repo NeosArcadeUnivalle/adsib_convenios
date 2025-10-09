@@ -1,0 +1,62 @@
+text,severity
+"Se otorgará un trato preferencial de precios al adjudicatario.",HIGH
+"Las ofertas del proveedor tendrán precios exclusivos para esta entidad.",HIGH
+"El contratista aplicará un precio menor al listado para el comprador.",HIGH
+"Se permitirá otorgar descuentos exclusivos a una de las partes.",HIGH
+"Se establecerá un catálogo con precios preferenciales para el contratante.",HIGH
+"Se autoriza un precio especial para pedidos de esta entidad.",HIGH
+"Se pacta precio preferencial durante la vigencia del convenio.",HIGH
+"El proveedor podrá fijar precios por debajo del mercado sólo para la entidad.",HIGH
+"Queda habilitado un esquema de precios selectivos a favor de la entidad.",HIGH
+"Se aplicarán precios diferenciados en beneficio del contratante.",HIGH
+"Se reconoce tratamiento preferencial en materia de precios.",HIGH
+"Se habilitan descuentos reservados exclusivamente para la entidad pública.",HIGH
+"El listado incluirá precios preferenciales para esta contratación.",HIGH
+"El proveedor ajustará precios por debajo de terceros únicamente para la entidad.",HIGH
+"Se establecen condiciones de precio originalmente más ventajosas para la entidad.",HIGH
+"Para acceder al servicio se requiere una cantidad mínima por pedido.",MEDIUM
+"Se fija una orden mínima por transacción.",MEDIUM
+"Se exigirá volumen mínimo por cada solicitud.",MEDIUM
+"El contrato contempla compras superiores a la cantidad mínima definida.",MEDIUM
+"Las entregas estarán sujetas a un monto mínimo de compra.",MEDIUM
+"Se establece un piso de unidades para la atención de pedidos.",MEDIUM
+"Se acepta una cantidad mínima por ítem.",MEDIUM
+"Los pedidos por debajo del mínimo podrán rechazarse.",MEDIUM
+"Se reservará el derecho de atender solicitudes menores al mínimo pactado.",MEDIUM
+"Se incrementa el número máximo de reemisiones respecto a lo usual.",MEDIUM
+"Se habilitan reemisiones adicionales bajo evaluación previa.",MEDIUM
+"El proveedor realizará reemisiones cuando corresponda a solicitud.",MEDIUM
+"Se prevé mayor cantidad de reemisiones que el límite estándar.",MEDIUM
+"Las reemisiones podrán efectuarse sin costo adicional hasta cierto límite.",MEDIUM
+"Se autoriza un nivel superior de reemisiones por caso.",MEDIUM
+"El convenio se sujetará al presupuesto asignado.",LOW
+"Todas las contrataciones estarán condicionadas a disponibilidad presupuestaria.",LOW
+"Las adquisiciones se supeditan al techo presupuestario vigente.",LOW
+"El gasto quedará condicionado al presupuesto aprobado.",LOW
+"Se impondrá un límite presupuestario para estas compras.",LOW
+"El financiamiento dependerá de la programación presupuestaria.",LOW
+"No se asumirán compromisos de gasto automático.",LOW
+"Se prohíben gastos que excedan la asignación presupuestaria.",LOW
+"Las órdenes se ejecutarán según disponibilidad de recursos.",LOW
+"Los pagos estarán sujetos a certificación presupuestaria.",LOW
+"El tope presupuestario no podrá superarse.",LOW
+"Se operará bajo restricciones de gasto establecidas.",LOW
+"El presupuesto se administrará conforme a norma vigente.",LOW
+"Las solicitudes quedarán subordinadas a la existencia de partidas.",LOW
+"Se requerirá certificación presupuestaria previa.",LOW
+"Se prevé un esquema de precios exclusivos a favor del contratante.",HIGH
+"Se aplicarán precios selectivos en beneficio de la entidad.",HIGH
+"El proveedor otorgará precios exclusivos para esta entidad.",HIGH
+"Se establece tratamiento preferencial de precios para el contratante.",HIGH
+"Se reconocerán precios diferenciados a favor de la entidad pública.",HIGH
+"Precios exclusivos serán válidos durante la vigencia del convenio.",HIGH
+"Se autoriza un plan de precios preferentes para la administración.",HIGH
+"Habrá precios especiales reservados para esta entidad.",HIGH
+"Se admitirán descuentos exclusivos para pedidos de la entidad.",HIGH
+"Se habilita una tabla de precios preferidos a favor del contratante.",HIGH
+"Los pedidos deberán cumplir una cantidad mínima acordada.",MEDIUM
+"Se exigirá una orden mínima por transacción.",MEDIUM
+"Se permite mayor número de reemisiones que el habitual.",MEDIUM
+"Las reemisiones se incrementan por encima del límite corriente.",MEDIUM
+"Las órdenes dependen de la disponibilidad presupuestaria.",LOW
+"Ejecutar gastos estará condicionado al presupuesto aprobado.",LOW

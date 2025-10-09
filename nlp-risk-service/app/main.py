@@ -1,22 +1,26 @@
+# app/main.py  — v1.3
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import spacy
 from typing import List, Optional, Dict, Any
-import re
-import unicodedata
-import math
+import re, unicodedata, math, os
+from pathlib import Path
 
-# ====== opcional: embeddings para "anticipaciones" (cláusulas nuevas) ======
+import joblib
+import numpy as np
+import spacy
+
+# ====== (opcional) embeddings para fallback semántico ======
+# Si en tu entorno hay problemas con HuggingFace, esto quedará en False y no se usará el fallback.
 try:
     from sentence_transformers import SentenceTransformer, util
     _EMB_OK = True
-    _embedder = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+    _fallback_embedder = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
 except Exception:
     _EMB_OK = False
-    _embedder = None
+    _fallback_embedder = None
 
-app = FastAPI(title="NLP Risk Service", version="1.2")
+app = FastAPI(title="NLP Risk Service", version="1.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,7 +28,7 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
-# ---------- modelos ----------
+# ---------- modelos de IO ----------
 class AnalyzeIn(BaseModel):
     text: str
 
@@ -41,7 +45,7 @@ class Match(BaseModel):
 class AnalyzeOut(BaseModel):
     risk_level: str        # ALTO | MEDIO | BAJO
     score: float           # 0..1
-    matches: List[Match]   # hallazgos con detalle
+    matches: List[Match]
     summary: Dict[str, Any]
 
 # ---------- utilidades ----------
@@ -53,10 +57,7 @@ def _norm(s: str) -> str:
 _PAGE_RE = re.compile(r"(p[aá]gina|page)\s+(\d+)", re.I)
 
 def _index_lines(text: str):
-    """
-    Indexa líneas y páginas. Devuelve lista de dicts:
-    {idx, page, line, start, end, text}
-    """
+    """Devuelve lista de líneas con (page,line,start,end,text)."""
     out = []
     page = 1
     start = 0
@@ -68,37 +69,30 @@ def _index_lines(text: str):
                 page = int(m.group(2))
             except Exception:
                 pass
-        out.append({
-            "idx": i + 1,
-            "page": page,
-            "line": i + 1,
-            "start": start,
-            "end": end,
-            "text": line,
-        })
-        start = end + 1  # +1 por el salto de línea que eliminamos con split
+        out.append({"idx": i + 1, "page": page, "line": i + 1, "start": start, "end": end, "text": line})
+        start = end + 1
     return out
 
 def _find_occurrences(hay: str, needle: str):
-    """Devuelve posiciones start/end (inclusive/exclusivo) de cada match."""
+    """Posiciones start/end de coincidencias exactas (case-insensitive)."""
     out = []
     if not needle.strip():
         return out
-    lo_hay = hay.lower()
-    lo_needle = needle.lower()
-    idx = 0
-    safe = 0
+    lo_hay, lo_needle = hay.lower(), needle.lower()
+    idx, guard = 0, 0
     while True:
         pos = lo_hay.find(lo_needle, idx)
-        if pos == -1 or safe > 10000:
+        if pos == -1 or guard > 10000:
             break
         out.append((pos, pos + len(needle)))
         idx = pos + len(needle)
-        safe += 1
+        guard += 1
     return out
 
 def _char_to_page_line(char_pos: int, index_lines):
-    """De posición absoluta de char a (page, line) usando el índice."""
+    """De un offset absoluto devuelve (page, line) usando el índice."""
+    if char_pos is None:
+        return None, None
     for item in index_lines:
         if item["start"] <= char_pos <= item["end"]:
             return item["page"], item["line"]
@@ -106,8 +100,7 @@ def _char_to_page_line(char_pos: int, index_lines):
         return index_lines[-1]["page"], index_lines[-1]["line"]
     return None, None
 
-# ---------- reglas/keywords ----------
-# token -> (severity, reason)
+# ---------- reglas ----------
 KEYWORDS = {
     "precios preferenciales": ("HIGH",   "Posible trato preferencial de precios."),
     "menores precios":        ("HIGH",   "Referencia a reducción de precios no justificada."),
@@ -123,7 +116,6 @@ KEYWORDS = {
     "descuento":              ("LOW",    "Mención a descuentos."),
 }
 
-# Patrones con regex (más flexibles)
 PATTERNS = [
     (re.compile(r"(precio).{0,10}(preferencial|preferentes?)", re.I), "HIGH",
      "Referencia explícita a 'precio preferencial'."),
@@ -133,7 +125,7 @@ PATTERNS = [
      "Incremento de reemisiones."),
 ]
 
-# Arquetipos: frases base para similitud semántica (anticipar redacciones nuevas)
+# Fallback semántico si NO hay clasificador entrenado
 ARCHETYPES = [
     ("HIGH",   "El proveedor tendrá precios preferenciales para el contratante."),
     ("HIGH",   "Se permite otorgar descuentos exclusivos a una de las partes."),
@@ -142,15 +134,46 @@ ARCHETYPES = [
     ("LOW",    "El convenio queda sujeto al límite presupuestario asignado."),
 ]
 
-# pesos de severidad para score
 SEV_W = {"HIGH": 1.0, "MEDIUM": 0.6, "LOW": 0.35}
 
 def _risk_from_score(score: float) -> str:
-    if score >= 0.66:
-        return "ALTO"
-    if score >= 0.33:
-        return "MEDIO"
+    if score >= 0.66: return "ALTO"
+    if score >= 0.33: return "MEDIO"
     return "BAJO"
+
+# ---------- carga de modelo entrenado (si existe) ----------
+MODEL_DIR = Path(os.getenv("RISK_MODEL_DIR", "models"))
+MODEL_HEAD_PATH = MODEL_DIR / "risk_head.joblib"
+
+_head = None           # clasificador sklearn (o pipeline TF-IDF)
+_head_le = None        # label encoder
+_head_embedder = None  # SentenceTransformer si el modelo NO es TF-IDF
+_head_embedder_name = None
+
+def _load_head() -> bool:
+    """Carga el clasificador entrenado si está disponible."""
+    global _head, _head_le, _head_embedder, _head_embedder_name
+    if _head is not None:
+        return True
+    if not MODEL_HEAD_PATH.exists():
+        return False
+    bundle = joblib.load(MODEL_HEAD_PATH)
+    _head = bundle["clf"]
+    _head_le = bundle["label_encoder"]
+    _head_embedder_name = bundle.get("embedder_name", "")
+    # Si el embedder es TF-IDF pipeline, no necesitamos SentenceTransformer
+    if str(_head_embedder_name).startswith("tfidf"):
+        _head_embedder = None
+        return True
+    # Para SBERT, intentamos cargar el mismo modelo usado en entrenamiento
+    try:
+        from sentence_transformers import SentenceTransformer as _ST
+        _head_embedder = _ST(_head_embedder_name or "paraphrase-multilingual-MiniLM-L12-v2")
+        return True
+    except Exception:
+        # Cargó el clasificador pero no podemos instanciar el embedder (entonces no usamos la parte semántica del head)
+        _head_embedder = None
+        return True
 
 # ---------- análisis ----------
 def _analyze(text: str) -> AnalyzeOut:
@@ -158,14 +181,12 @@ def _analyze(text: str) -> AnalyzeOut:
     idx = _index_lines(text)
     matches: List[Match] = []
 
-    # 1) keywords exactas
+    # 1) palabras clave
     for tok, (sev, why) in KEYWORDS.items():
         for start, end in _find_occurrences(text, tok):
             p, l = _char_to_page_line(start, idx)
-            matches.append(Match(
-                token=tok, severity=sev, source="keyword", reason=why,
-                page=p, line=l, start=start, end=end
-            ))
+            matches.append(Match(token=tok, severity=sev, source="keyword", reason=why,
+                                 page=p, line=l, start=start, end=end))
 
     # 2) patrones regex
     for rx, sev, why in PATTERNS:
@@ -173,78 +194,118 @@ def _analyze(text: str) -> AnalyzeOut:
             start, end = m.span()
             tok = m.group(0)
             p, l = _char_to_page_line(start, idx)
-            matches.append(Match(
-                token=tok, severity=sev, source="pattern", reason=why,
-                page=p, line=l, start=start, end=end
-            ))
+            matches.append(Match(token=tok, severity=sev, source="pattern", reason=why,
+                                 page=p, line=l, start=start, end=end))
 
-    # 3) anticipaciones semánticas (opcional)
+    # 3) modelo entrenado o fallback semántico
     semantic_hits = 0
-    if _EMB_OK:
-        nlp = spacy.blank("es")
-        nlp.add_pipe("sentencizer")
-        doc = nlp(text)
-        sentences = [s.text.strip() for s in doc.sents if s.text.strip()]
-        if sentences:
-            S = _embedder.encode(sentences, convert_to_tensor=True, normalize_embeddings=True)
-            T = _embedder.encode([t for _, t in ARCHETYPES], convert_to_tensor=True, normalize_embeddings=True)
-            sim = util.cos_sim(S, T)  # [num_sent, num_arche]
+    nlp = spacy.blank("es"); nlp.add_pipe("sentencizer")
+    sentences = [s.text.strip() for s in nlp(text).sents if s.text.strip()]
+
+    if _load_head() and sentences and _head is not None and _head_le is not None:
+        classes = list(_head_le.classes_)
+        # Umbrales por clase (ajustables)
+        thr = {"HIGH": 0.60, "MEDIUM": 0.55, "LOW": 0.70}
+
+        # Si el head es pipeline TF-IDF, acepta texto crudo
+        if (_head_embedder is None) and str(_head_embedder_name).startswith("tfidf"):
+            try:
+                proba = _head.predict_proba(sentences)  # el pipeline vectoriza internamente
+            except Exception:
+                proba = None
+        else:
+            # SBERT: necesitamos embeddings
+            proba = None
+            if _head_embedder is not None:
+                S = _head_embedder.encode(sentences, convert_to_numpy=True, normalize_embeddings=True)
+                proba = _head.predict_proba(S)
+
+        if proba is not None:
             for i, sent in enumerate(sentences):
-                best_j = int(sim[i].argmax())
-                score_sim = float(sim[i][best_j])
-                sev_seed, seed_text = ARCHETYPES[best_j]
-                sev = None
-                if score_sim >= 0.80:
-                    sev = "HIGH"
-                elif score_sim >= 0.70:
-                    sev = "MEDIUM"
-                elif score_sim >= 0.60:
-                    sev = "LOW"
-                if sev:
+                j = int(np.argmax(proba[i]))
+                sev = classes[j]
+                pconf = float(proba[i][j])
+                if pconf >= thr.get(sev, 0.6):
                     semantic_hits += 1
                     pos = text.find(sent)
-                    p, l = _char_to_page_line(max(0, pos), idx)
+                    pos = max(0, pos)
+                    pnum, lnum = _char_to_page_line(pos, idx)
                     matches.append(Match(
                         token=sent[:100] + ("…" if len(sent) > 100 else ""),
                         severity=sev, source="semantic",
-                        reason=f"Similar a: “{seed_text}” (sim={score_sim:.2f})",
-                        page=p, line=l, start=pos, end=pos+len(sent)
+                        reason=f"Modelo entrenado (p={pconf:.2f})",
+                        page=pnum, line=lnum, start=pos, end=pos+len(sent)
                     ))
 
-    # 4) score: suma ponderada con compresión suave
-    if not matches:
-        score = 0.0
-    else:
-        raw = 0.0
-        for m in matches:
-            raw += SEV_W.get(m.severity, 0.35)
-        score = math.tanh(raw / 3.0)  # 0..~1
+    elif _EMB_OK and sentences:
+        # Fallback: similitud con arquetipos (si hay SentenceTransformer disponible)
+        S = _fallback_embedder.encode(sentences, convert_to_numpy=True, normalize_embeddings=True)
+        T = _fallback_embedder.encode([t for _, t in ARCHETYPES], convert_to_numpy=True, normalize_embeddings=True)
+        sim = S @ T.T  # coseno normalizado
+        for i, sent in enumerate(sentences):
+            best_j = int(np.argmax(sim[i]))
+            score_sim = float(sim[i][best_j])
+            sev_seed, seed_text = ARCHETYPES[best_j]
+            sev = None
+            if score_sim >= 0.80: sev = "HIGH"
+            elif score_sim >= 0.70: sev = "MEDIUM"
+            elif score_sim >= 0.60: sev = "LOW"
+            if sev:
+                semantic_hits += 1
+                pos = max(0, text.find(sent))
+                pnum, lnum = _char_to_page_line(pos, idx)
+                matches.append(Match(
+                    token=sent[:100] + ("…" if len(sent) > 100 else ""),
+                    severity=sev, source="semantic",
+                    reason=f"Similar a arquetipo (sim={score_sim:.2f})",
+                    page=pnum, line=lnum, start=pos, end=pos+len(sent)
+                ))
+
+    # 4) score total
+    score = 0.0
+    if matches:
+        raw = sum({"HIGH":1.0,"MEDIUM":0.6,"LOW":0.35}.get(m.severity,0.35) for m in matches)
+        score = math.tanh(raw / 3.0)
 
     risk_level = _risk_from_score(score)
-
-    # coherencia: si no hay matches ni anticipaciones => BAJO/0
     if len(matches) == 0 and semantic_hits == 0:
-        score = 0.0
-        risk_level = "BAJO"
+        score, risk_level = 0.0, "BAJO"
 
     by_sev = {"HIGH": 0, "MEDIUM": 0, "LOW": 0}
     for m in matches:
         by_sev[m.severity] = by_sev.get(m.severity, 0) + 1
 
-    out = AnalyzeOut(
+    return AnalyzeOut(
         risk_level=risk_level,
         score=round(float(score), 4),
         matches=matches,
         summary={
             "total": len(matches),
             "by_severity": by_sev,
-            "semantic_used": _EMB_OK,
+            "semantic_used": bool(_head is not None),
+            "model_embedder": _head_embedder_name or ("fallback" if _EMB_OK else None),
         }
     )
-    return out
 
-# ---------- endpoint ----------
+# ---------- endpoints ----------
 @app.post("/analyze", response_model=AnalyzeOut)
 def analyze(payload: AnalyzeIn):
-    text = payload.text or ""
-    return _analyze(text)
+    return _analyze(payload.text or "")
+
+@app.get("/health")
+def health():
+    loaded = _load_head()
+    return {
+        "ok": True,
+        "version": "1.3",
+        "model_loaded": loaded,
+        "model_dir": str(MODEL_DIR),
+        "model_embedder": _head_embedder_name,
+        "embeddings_fallback_ok": bool(_EMB_OK),
+        "keywords": len(KEYWORDS),
+        "patterns": len(PATTERNS),
+    }
+
+@app.get("/")
+def root():
+    return {"ok": True, "message": "NLP Risk Service v1.3"}
