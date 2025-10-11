@@ -13,8 +13,10 @@ return [
     | a conventional file to locate the various service credentials.
     |
     */
-    'nlp_risk' => [
-        'base_url' => env('NLP_RISK_URL', 'http://127.0.0.1:8001'),
+    // config/services.php
+    'risk_nlp' => [
+        'url'     => env('NLP_API_URL', 'http://127.0.0.1:8001'),
+        'timeout' => env('NLP_API_TIMEOUT', 8),
     ],
 
     'mailgun' => [
