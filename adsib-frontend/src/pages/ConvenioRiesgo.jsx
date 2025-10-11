@@ -80,10 +80,6 @@ function highlightRich(text="", tokenStyles=new Map(), extraFinds=[]) {
     const re = new RegExp(`(${safe})`, "gi");
 
     const ring = st.ring ? `;box-shadow:0 0 0 2px ${st.ring} inset` : "";
-    const badge =
-      st.kind === "semantic"
-        ? `<span style="background:#0b4a78;color:#dbeafe;border-radius:4px;padding:0 4px;margin-left:6px;font-size:10px">anticipación</span>`
-        : `<span style="background:rgba(0,0,0,.18);border-radius:4px;padding:0 4px;margin-left:6px;font-size:10px">${SEV[st.severity]?.label || "N/A"}</span>`;
 
     html = html.replace(
       re,
