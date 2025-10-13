@@ -2,62 +2,62 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import DiffMatchPatch from "diff-match-patch";
 import api from "../api";
-
+ 
 /* ===== helpers ===== */
 const escapeHtml = (s = "") =>
   s.replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
-
+ 
 const pageFromLine = (line) => {
   const m = /(p[áa]gina|page)\s+(\d+)/i.exec(line || "");
   return m ? parseInt(m[2], 10) : null;
 };
-
+ 
 /** Diff a NIVEL DE LÍNEA */
 function buildLineDiff(aText = "", bText = "") {
   const dmp = new DiffMatchPatch();
   const diffs = dmp.diff_main(aText, bText);
   dmp.diff_cleanupSemantic(diffs);
-
+ 
   const rows = [];
   let la = 1, lb = 1;
   let pa = null, pb = null;
-
+ 
   const push = (op, line) => {
     const pA = (op <= 0) ? pageFromLine(line) : null;
     const pB = (op >= 0) ? pageFromLine(line) : null;
     if (pA != null) pa = pA;
     if (pB != null) pb = pB;
-
+ 
     if (op === 0) { rows.push({ op, aNum: la, bNum: lb, aPage: pa, bPage: pb, text: line }); la++; lb++; }
     else if (op === -1) { rows.push({ op, aNum: la, bNum: "", aPage: pa, bPage: "", text: line }); la++; }
     else { rows.push({ op, aNum: "", bNum: lb, aPage: "", bPage: pb, text: line }); lb++; }
   };
-
+ 
   for (const [op, data] of diffs) {
     const parts = (data ?? "").toString().split("\n");
     for (let i = 0; i < parts.length; i++) push(op, parts[i]);
   }
   return rows;
 }
-
+ 
 /* ===== estilos locales de botones ===== */
 const BTN = {
-  back:   { background:"#374151", borderColor:"#4b5563", color:"#e5e7eb" },
-  action: { background:"#1a6779", borderColor:"#125463", color:"#fff" },
-  dark:   { background:"#111827", borderColor:"#1f2937", color:"#e5e7eb" },
-  disabled: { opacity:.7, cursor:"not-allowed" },
+  back:    { background:"#374151", borderColor:"#4b5563", color:"#e5e7eb" },
+  action:  { background:"#1a6779", borderColor:"#125463", color:"#fff" },
+  dark:    { background:"#111827", borderColor:"#1f2937", color:"#e5e7eb" },
+  disabled:{ opacity:.7, cursor:"not-allowed" },
 };
-
+ 
 export default function ConvenioComparar() {
   const { id } = useParams();
-
+ 
   const [conv, setConv] = useState(null);
   const [versiones, setVersiones] = useState([]);
   const [selA, setSelA] = useState("");
   const [selB, setSelB] = useState("");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
-
+ 
   // búsqueda
   const [q, setQ] = useState("");
   const matches = useMemo(() => {
@@ -70,24 +70,38 @@ export default function ConvenioComparar() {
   }, [q, rows]);
   const [cur, setCur] = useState(0);
   const containerRef = useRef(null);
-
+ 
   const load = useCallback(async () => {
     const [a, b] = await Promise.all([
       api.get(`/convenios/${id}`),
-      api.get(`/convenios/${id}/versiones`),
+      api.get(`/convenios/${id}/versiones`, { params: { per_page: 100 } }),
     ]);
     setConv(a.data);
-    const vs = b.data || [];
+ 
+    // Normaliza: si viene paginador usa .data; si es array lo dejas
+    const payload = b.data;
+    const vs = Array.isArray(payload) ? payload : (payload?.data || []);
     setVersiones(vs);
+ 
     if (vs.length >= 2) {
-      const last = vs[0], prev = vs[1];
+      const last = vs[0], prev = vs[1]; // vienen en orden desc por numero_version
       setSelA(String(prev.id));
       setSelB(String(last.id));
     }
   }, [id]);
-
+ 
   useEffect(() => { load(); }, [load]);
-
+ 
+  // Función segura para traer texto (si 422/500 => '')
+  const fetchText = async (versionId) => {
+    try {
+      const { data } = await api.get(`/versiones/${versionId}/texto`);
+      return data?.text || "";
+    } catch {
+      return "";
+    }
+  };
+ 
   const comparar = async (e) => {
     e?.preventDefault();
     if (!selA || !selB || selA === selB) {
@@ -95,15 +109,15 @@ export default function ConvenioComparar() {
     }
     try {
       setLoading(true);
-      const [ta, tb] = await Promise.all([
-        api.get(`/versiones/${selA}/texto`),
-        api.get(`/versiones/${selB}/texto`),
+      const [textA, textB] = await Promise.all([
+        fetchText(selA),
+        fetchText(selB),
       ]);
-      const textA = ta.data?.text ?? "";
-      const textB = tb.data?.text ?? "";
+ 
       const rs = buildLineDiff(textA, textB);
       setRows(rs);
       setCur(0);
+ 
       setTimeout(() => {
         if (matches.length > 0 && containerRef.current) {
           const el = containerRef.current.querySelector(`[data-row="${matches[0]}"]`);
@@ -115,9 +129,9 @@ export default function ConvenioComparar() {
       setRows([]);
     } finally { setLoading(false); }
   };
-
+ 
   useEffect(() => { setCur(0); }, [q]);
-
+ 
   const gotoMatch = (dir) => {
     if (!matches.length) return;
     const next = (cur + (dir === "next" ? 1 : -1) + matches.length) % matches.length;
@@ -126,7 +140,7 @@ export default function ConvenioComparar() {
     const el = containerRef.current?.querySelector(`[data-row="${idx}"]`);
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
-
+ 
   return (
     <div className="card" style={{ padding:20 }}>
       {/* Header */}
@@ -134,7 +148,7 @@ export default function ConvenioComparar() {
         <Link to={`/convenios/${id}`} className="btn" style={BTN.back}>Volver al convenio</Link>
         <h2 style={{margin:0}}>Comparar versiones — {conv?.titulo || "..."}</h2>
       </div>
-
+ 
       {/* Controles */}
       <div className="card" style={{marginTop:10}}>
         <form onSubmit={comparar}
@@ -148,7 +162,7 @@ export default function ConvenioComparar() {
             <option value="">Versión B…</option>
             {versiones.map(v => <option key={v.id} value={v.id}>v{v.numero_version}</option>)}
           </select>
-
+ 
           <button
             className="btn"
             style={{...BTN.action, ...( (!selA || !selB || selA===selB || loading) ? BTN.disabled : {} )}}
@@ -156,7 +170,7 @@ export default function ConvenioComparar() {
           >
             Comparar
           </button>
-
+ 
           <div style={{marginLeft:"auto", display:"flex", gap:8, alignItems:"center"}}>
             <input
               placeholder="Buscar en resultado…"
@@ -177,14 +191,14 @@ export default function ConvenioComparar() {
             </span>
           </div>
         </form>
-
+ 
         {/* Leyenda */}
         <div style={{marginTop:10, display:"flex", gap:10, fontSize:12}}>
           <span style={{background:"#7f1d1d", color:"#fff", padding:"2px 8px", borderRadius:6}}>eliminado (A)</span>
           <span style={{background:"#14532d", color:"#fff", padding:"2px 8px", borderRadius:6}}>agregado (B)</span>
         </div>
       </div>
-
+ 
       {/* Resultado */}
       <div className="card" style={{marginTop:10}}>
         <div ref={containerRef} style={{maxHeight:480, overflow:"auto"}}>
@@ -209,7 +223,7 @@ export default function ConvenioComparar() {
                 const isDel = r.op === -1;
                 let text = escapeHtml(r.text || "");
                 if (q) {
-                  const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")})`, "gi");
+                  const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
                   text = text.replace(
                     re,
                     '<mark style="background:#f59e0b;color:#111827;border-radius:3px;padding:0 2px">$1</mark>'
