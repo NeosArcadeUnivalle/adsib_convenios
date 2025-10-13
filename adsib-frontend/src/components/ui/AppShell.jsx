@@ -25,31 +25,41 @@ export default function AppShell() {
   useEffect(() => {
     const LS_KEY = "seen_dashboard_popup_v2";
     const justLogged = sessionStorage.getItem("just_logged_v2") === "1";
- 
-    api
-      .get("/dashboard/overview")
-      .then(({ data }) => {
-        setCounts({
-          notificaciones: Number(data?.notificaciones ?? 0),
-          convenios_vencidos: Number(data?.convenios_vencidos ?? 0),
-          riesgo_alto: Number(data?.riesgo_alto ?? 0),
-          riesgo_medio: Number(data?.riesgo_medio ?? 0),
+  
+    const fetchOverview = () => {
+      api
+        .get("/dashboard/overview")
+        .then(({ data }) => {
+          setCounts({
+            notificaciones: Number(data?.notificaciones ?? 0),
+            convenios_vencidos: Number(data?.convenios_vencidos ?? 0),
+            riesgo_alto: Number(data?.riesgo_alto ?? 0),
+            riesgo_medio: Number(data?.riesgo_medio ?? 0),
+          });
+  
+          if (justLogged || forcePopup || !localStorage.getItem(LS_KEY)) {
+            setShowPopup(true);
+          }
+        })
+        .catch(() => {
+          if (justLogged || forcePopup || !localStorage.getItem(LS_KEY)) {
+            setShowPopup(true);
+          }
+        })
+        .finally(() => {
+          sessionStorage.removeItem("just_logged_v2");
         });
- 
-        if (justLogged || forcePopup || !localStorage.getItem(LS_KEY)) {
-          setShowPopup(true);
-        }
-      })
-      .catch(() => {
-        if (justLogged || forcePopup || !localStorage.getItem(LS_KEY)) {
-          setShowPopup(true);
-        }
-      })
-      .finally(() => {
-        sessionStorage.removeItem("just_logged_v2");
-      });
+    };
+  
+    // Cargar al inicio
+    fetchOverview();
+  
+    // 🔁 Refrescar cada 30s
+    const interval = setInterval(fetchOverview, 30000);
+  
+    return () => clearInterval(interval);
   }, [forcePopup]);
- 
+
   const closePopup = () => {
     localStorage.setItem("seen_dashboard_popup_v2", "1");
     setShowPopup(false);

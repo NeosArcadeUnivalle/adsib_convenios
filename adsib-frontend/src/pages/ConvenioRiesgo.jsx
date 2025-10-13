@@ -1,9 +1,11 @@
 // resources/js/pages/ConvenioRiesgo.jsx
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import api from "../api";
 
 /* =================== Paletas =================== */
+
 const RISK = {
   ALTO:    { bg: "#991b1b", fg: "#fff", label: "ALTO"  },
   MEDIO:   { bg: "#92400e", fg: "#fff", label: "MEDIO" },
@@ -11,6 +13,7 @@ const RISK = {
   DEFAULT: { bg: "#374151", fg: "#fff", label: "—"     }
 };
 const levelStyle = (lvl) => RISK[lvl] || RISK.DEFAULT;
+
 
 // severidad para hallazgos por REGLAS (directo a la lista)
 const SEV = {
@@ -22,6 +25,7 @@ const SEV = {
 // anticipación semántica (cuando source === 'semantic')
 const SEMANTIC = { bg: "#60a5fa", fg: "#0b213c", ring: "rgba(96,165,250,.35)" };
 
+
 const BTN = {
   back:     { background:"#374151", borderColor:"#4b5563", color:"#e5e7eb" },
   primary:  { background:"#1a6779", borderColor:"#125463", color:"#fff" },
@@ -31,7 +35,9 @@ const BTN = {
   disabled: { opacity:.6, cursor:"not-allowed" }
 };
 
+
 /* =================== helpers de texto =================== */
+
 const normalize = (s="") => s.replace(/\r/g,"").replace(/[ \t]+\n/g,"\n").trim();
 const esc = (s="") => s.replace(/[&<>"']/g, (m) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
 
@@ -57,6 +63,7 @@ function buildTokenStyles(matches=[]) {
   });
   return map;
 }
+
 
 /** Resalta texto con estilos por token (directo/semántico y severidad). */
 function highlightRich(text="", tokenStyles=new Map(), extraFinds=[]) {
@@ -92,6 +99,7 @@ function highlightRich(text="", tokenStyles=new Map(), extraFinds=[]) {
   return { __html: html };
 }
 
+
 const countTokens = (tokens=[]) => {
   const map = new Map();
   tokens.forEach(t => {
@@ -103,6 +111,7 @@ const countTokens = (tokens=[]) => {
     .map(([token, count]) => ({ token, count }))
     .sort((a,b)=> b.count - a.count || a.token.localeCompare(b.token));
 };
+
 
 function makeSnippets(text="", tokens=[], max=15) {
   if (!text || !tokens?.length) return [];
@@ -139,6 +148,7 @@ function matchDensity(text="", tokens=[]) {
   return Math.min(1, total / Math.max(1, text.length));
 }
 
+
 /* ===== Helpers amigables para historial ===== */
 const modelFriendly = (m = "") => {
   const x = (m || "").toLowerCase();
@@ -153,7 +163,9 @@ const modelFriendly = (m = "") => {
 const fmtPct   = (n) => (Math.max(0, Math.min(1, Number(n ?? 0))) * 100).toFixed(0) + "%";
 const fmtFecha = (s) => { try { return new Date(s).toLocaleString(); } catch { return s || "—"; } };
 
+
 /* =================== Página =================== */
+
 export default function ConvenioRiesgo(){
   const { id } = useParams();
 
@@ -167,7 +179,8 @@ export default function ConvenioRiesgo(){
 
   const [result, setResult] = useState(null); // respuesta /analisis/riesgo
   const [history, setHistory] = useState([]); // lista de analisis_riesgos
-  const [histMeta, setHistMeta] = useState({ page: 1, hasMore:false });
+  const [page, setPage] = useState(1);
+  const [histMeta, setHistMeta] = useState({ page: 1, per: 5, total: 0 });
 
   const [onlyMatches, setOnlyMatches] = useState(false);
   const [q, setQ] = useState("");
@@ -201,25 +214,31 @@ export default function ConvenioRiesgo(){
     }
   }, []);
 
-  // Historial (analisis_riesgos)
-  const loadHistory = useCallback(async (page = 1, versionIdParam) => {
-    const versionId = versionIdParam || sel;
-    if (!versionId) return;
+  // Historial (analisis_riesgos) – GENERAL POR CONVENIO con paginación (5 por página)
+  const loadHistory = useCallback(async (p = 1) => {
+    if (!conv?.id) return;
     try {
-      const { data } = await api.get('/analisis', { params: { version_id: versionId, page, per: 10 } });
+      const { data } = await api.get('/analisis', {
+        params: { convenio_id: conv.id, page: p, per: 5 }
+      });
       const items = Array.isArray(data?.data) ? data.data : [];
       setHistory(items);
-      setHistMeta({ page: data?.meta?.page || page, hasMore: !!data?.meta?.hasMore });
+      setHistMeta({
+        page: data?.meta?.page || p,
+        per:  data?.meta?.per  || 5,
+        total: data?.meta?.total || 0
+      });
+      setPage(data?.meta?.page || p);
     } catch {
       /* silencio */
     }
-  }, [sel]);
+  }, [conv?.id]);
 
   // Carga texto + historial cuando cambia la versión seleccionada
   useEffect(() => {
     if (sel) {
       loadText(sel);
-      loadHistory(1, sel);
+      loadHistory(1); // historial por convenio, primera página
     }
   }, [sel, loadText, loadHistory]);
 
@@ -235,7 +254,7 @@ export default function ConvenioRiesgo(){
         convenio_id: conv?.id,
       });
       setResult(data || null);
-      await loadHistory(1, sel); // refrescar historial
+      await loadHistory(1); // refrescar historial (página 1)
     } catch (e) {
       setErr(e.response?.data?.message || "No se pudo analizar el texto.");
     } finally {
@@ -300,6 +319,11 @@ export default function ConvenioRiesgo(){
   /* ====== render ====== */
   const lvl = levelStyle(result?.risk_level);
   const scorePct = Math.max(0, Math.min(1, Number(result?.score ?? 0))) * 100;
+
+  // datos de paginación
+  const totalPages = Math.max(1, Math.ceil((histMeta.total || 0) / (histMeta.per || 5)));
+  const canPrev = page > 1;
+  const canNext = page < totalPages;
 
   return (
     <div className="card" style={{ padding: 20 }}>
@@ -407,64 +431,84 @@ export default function ConvenioRiesgo(){
       <div className="card" style={{marginTop:10}}>
         <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
           <h3 style={{margin:0, fontSize:16}}>Historial de análisis</h3>
-          {histMeta.hasMore && (
-            <button className="btn" style={BTN.neutral} onClick={()=>loadHistory(histMeta.page + 1)}>
-              Más…
-            </button>
-          )}
         </div>
 
         {history.length === 0 ? (
-          <div style={{opacity:.8, marginTop:8}}>Aún no hay análisis registrados para esta versión.</div>
+          <div style={{opacity:.8, marginTop:8}}>Aún no hay análisis registrados para este convenio.</div>
         ) : (
-          <div style={{marginTop:10, display:"grid", gap:10}}>
-            {history.map((h) => {
-              const fecha = fmtFecha(h.analizado_en || h.created_at);
-              const lvlH  = levelStyle(h.risk_level);
-              const confianza = fmtPct(h.score);
-              const hallazgos = h.matches ?? 0;
-              const motor = modelFriendly(h.modelo);
+          <>
+            <div style={{marginTop:10, display:"grid", gap:10}}>
+              {history.map((h) => {
+                const fecha = fmtFecha(h.analizado_en || h.created_at);
+                const lvlH  = levelStyle(h.risk_level);
+                const confianza = fmtPct(h.score);
+                const hallazgos = h.matches ?? 0;
+                const motor = modelFriendly(h.modelo);
 
-              return (
-                <div key={h.id}
-                  style={{
-                    display:"grid",
-                    gridTemplateColumns:"180px 1fr",
-                    gap:12,
-                    padding:12,
-                    border:"1px solid rgba(255,255,255,.08)",
-                    borderRadius:10,
-                    background:"rgba(0,0,0,.25)"
-                  }}
-                >
-                  <div>
-                    <div style={{opacity:.8, fontSize:12}}>{fecha}</div>
-                    <div style={{marginTop:6, display:"inline-block", padding:"6px 10px",
-                      borderRadius:8, background:lvlH.bg, color:lvlH.fg, fontWeight:700}}>
-                      Riesgo: {lvlH.label}
+                return (
+                  <div key={h.id}
+                    style={{
+                      display:"grid",
+                      gridTemplateColumns:"180px 1fr",
+                      gap:12,
+                      padding:12,
+                      border:"1px solid rgba(255,255,255,.08)",
+                      borderRadius:10,
+                      background:"rgba(0,0,0,.25)"
+                    }}
+                  >
+                    <div>
+                      <div style={{opacity:.8, fontSize:12}}>{fecha}</div>
+                      <div style={{marginTop:6, display:"inline-block", padding:"6px 10px",
+                        borderRadius:8, background:lvlH.bg, color:lvlH.fg, fontWeight:700}}>
+                        Riesgo: {lvlH.label}
+                      </div>
                     </div>
-                  </div>
 
-                  <div style={{display:"flex", flexWrap:"wrap", gap:10, alignItems:"center"}}>
-                    <span className="pill">Confianza: <b>{confianza}</b></span>
-                    <span className="pill">Hallazgos totales: <b>{hallazgos}</b></span>
-                    <span className="pill">Método: <b>{motor}</b></span>
-                    <div style={{minWidth:160, flex:"0 0 auto"}}>
-                      <div style={{opacity:.8, fontSize:12, marginBottom:4}}>Nivel de confianza</div>
-                      <div style={{height:8, background:"#111827", borderRadius:999}}>
-                        <div style={{
-                          width: confianza,
-                          height:"100%",
-                          background:lvlH.bg,
-                          borderRadius:999
-                        }}/>
+                    <div style={{display:"flex", flexWrap:"wrap", gap:10, alignItems:"center"}}>
+                      <span className="pill">Confianza: <b>{confianza}</b></span>
+                      <span className="pill">Hallazgos totales: <b>{hallazgos}</b></span>
+                      <span className="pill">Método: <b>{motor}</b></span>
+                      <div style={{minWidth:160, flex:"0 0 auto"}}>
+                        <div style={{opacity:.8, fontSize:12, marginBottom:4}}>Nivel de confianza</div>
+                        <div style={{height:8, background:"#111827", borderRadius:999}}>
+                          <div style={{
+                            width: confianza,
+                            height:"100%",
+                            background:lvlH.bg,
+                            borderRadius:999
+                          }}/>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+
+            {/* Paginador */}
+            <div style={{display:'flex', justifyContent:'center', gap:12, marginTop:12, alignItems:'center'}}>
+              <button
+                className="btn"
+                style={BTN.neutral}
+                onClick={() => loadHistory(page - 1)}
+                disabled={!canPrev}
+              >
+                ◀ Anterior
+              </button>
+              <span style={{opacity:.8}}>
+                Página {page} de {totalPages}
+              </span>
+              <button
+                className="btn"
+                style={BTN.neutral}
+                onClick={() => loadHistory(page + 1)}
+                disabled={!canNext}
+              >
+                Siguiente ▶
+              </button>
+            </div>
+          </>
         )}
       </div>
 
@@ -536,6 +580,7 @@ export default function ConvenioRiesgo(){
           />
         </div>
       </div>
+
     </div>
   );
 }

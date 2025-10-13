@@ -142,21 +142,21 @@ class AnalisisController extends Controller
     // -------- Historial de análisis (sin cambios funcionales) ----------
     public function index(Request $request)
     {
-        $versionId = $request->query('version_id');
-        $perPage   = (int) ($request->query('per')  ?? 10);
-        $page      = (int) ($request->query('page') ?? 1);
- 
-        if (!$versionId) {
-            return response()->json(['message' => 'version_id es requerido'], 422);
+        $convenioId = $request->query('convenio_id');
+        $perPage    = (int) ($request->query('per') ?? 10);
+        $page       = (int) ($request->query('page') ?? 1);
+    
+        if (!$convenioId) {
+            return response()->json(['message' => 'convenio_id es requerido'], 422);
         }
- 
+    
         $query = DB::table('analisis_riesgos')
-            ->where('version_id', $versionId)
+            ->where('convenio_id', $convenioId)
             ->orderByDesc('analizado_en');
- 
+    
         $total = (clone $query)->count();
         $items = $query->forPage($page, $perPage)->get();
- 
+    
         return response()->json([
             'data' => $items,
             'meta' => [
