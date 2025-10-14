@@ -14,6 +14,42 @@ text,severity
 "El listado incluirá precios preferenciales para esta contratación.",HIGH
 "El proveedor ajustará precios por debajo de terceros únicamente para la entidad.",HIGH
 "Se establecen condiciones de precio originalmente más ventajosas para la entidad.",HIGH
+"Se prevé un esquema de precios exclusivos a favor del contratante.",HIGH
+"Se aplicarán precios selectivos en beneficio de la entidad.",HIGH
+"El proveedor otorgará precios exclusivos para esta entidad.",HIGH
+"Se establece tratamiento preferencial de precios para el contratante.",HIGH
+"Se reconocerán precios diferenciados a favor de la entidad pública.",HIGH
+"Precios exclusivos serán válidos durante la vigencia del convenio.",HIGH
+"Se autoriza un plan de precios preferentes para la administración.",HIGH
+"Habrá precios especiales reservados para esta entidad.",HIGH
+"Se admitirán descuentos exclusivos para pedidos de la entidad.",HIGH
+"Se habilita una tabla de precios preferidos a favor del contratante.",HIGH
+"El proveedor ofrecerá tarifas exclusivas para el contratante.",HIGH
+"Se acuerdan precios preferentes para compras institucionales.",HIGH
+"Se confirman precios especiales únicamente para la entidad pública.",HIGH
+"El proveedor concede trato de precios exclusivo a la entidad.",HIGH
+"Se entregarán listas de precios diferenciales para la administración.",HIGH
+"El proveedor asegura precios más bajos sólo para la entidad contratante.",HIGH
+"Se pacta esquema de precios reservados para la administración pública.",HIGH
+"Se admite política de precios preferenciales para esta contratación.",HIGH
+"El contratista ofrecerá un cuadro de precios exclusivos al contratante.",HIGH
+"Se autoriza trato preferente de precios a favor del comprador estatal.",HIGH
+"Se establecen tarifas promocionales exclusivas para la entidad.",HIGH
+"Se fija política de descuentos exclusivos para la institución.",HIGH
+"Se estipulan precios de privilegio para la entidad pública.",HIGH
+"El proveedor emitirá listas con precios especiales para la entidad.",HIGH
+"Se confiere condición de precios preferentes al contratante estatal.",HIGH
+"Se reservan precios diferenciados que benefician al contratante.",HIGH
+"Se acuerdan precios con trato selectivo para la entidad pública.",HIGH
+"El proveedor reservará tarifas especiales sólo para la entidad.",HIGH
+"Se disponen descuentos exclusivos y no extensibles a terceros.",HIGH
+"Se aprueban precios de venta exclusivos en favor del contratante.",HIGH
+"Precios preferenciales aplicarán únicamente a las órdenes de la entidad.",HIGH
+"Se reconoce un diferencial de precios exclusivo para este convenio.",HIGH
+"Se aceptan precios con trato privilegiado para el comprador público.",HIGH
+"Se habilitan rebajas exclusivas para pedidos institucionales.",HIGH
+"El proveedor ofrece condiciones de precio únicas para la entidad.",HIGH
+"Se contempla régimen de precios preferenciales sin equivalentes en el mercado.",HIGH
 "Para acceder al servicio se requiere una cantidad mínima por pedido.",MEDIUM
 "Se fija una orden mínima por transacción.",MEDIUM
 "Se exigirá volumen mínimo por cada solicitud.",MEDIUM
@@ -23,12 +59,28 @@ text,severity
 "Se acepta una cantidad mínima por ítem.",MEDIUM
 "Los pedidos por debajo del mínimo podrán rechazarse.",MEDIUM
 "Se reservará el derecho de atender solicitudes menores al mínimo pactado.",MEDIUM
+"Los pedidos deberán cumplir una cantidad mínima acordada.",MEDIUM
+"Se exigirá una orden mínima por transacción.",MEDIUM
+"El proveedor podrá denegar solicitudes que no alcancen el mínimo establecido.",MEDIUM
+"Las compras inferiores al mínimo quedarán sujetas a confirmación.",MEDIUM
+"Se establece un umbral mínimo por operación de compra.",MEDIUM
+"Se requiere volumen mínimo de facturación por pedido.",MEDIUM
+"Las solicitudes deberán superar el piso mínimo definido por ítem.",MEDIUM
+"El proveedor aplicará una cantidad mínima por cada despacho.",MEDIUM
+"Pedidos inferiores al mínimo podrán reprogramarse o rechazarse.",MEDIUM
+"Se obliga a cursar órdenes con cantidad mínima consolidada.",MEDIUM
 "Se incrementa el número máximo de reemisiones respecto a lo usual.",MEDIUM
 "Se habilitan reemisiones adicionales bajo evaluación previa.",MEDIUM
 "El proveedor realizará reemisiones cuando corresponda a solicitud.",MEDIUM
 "Se prevé mayor cantidad de reemisiones que el límite estándar.",MEDIUM
 "Las reemisiones podrán efectuarse sin costo adicional hasta cierto límite.",MEDIUM
 "Se autoriza un nivel superior de reemisiones por caso.",MEDIUM
+"Se permitirá reexpedición de documentos en más ocasiones que lo habitual.",MEDIUM
+"Se aceptan reexpediciones y reemisiones por encima del promedio.",MEDIUM
+"Se amplía el tope de reexpediciones/Reemisiones por incidente.",MEDIUM
+"El número de reexpediciones autorizadas excede el estándar vigente.",MEDIUM
+"Se contempla un mayor cupo de reemisiones por solicitud.",MEDIUM
+"Se fijan reemisiones adicionales frente a requerimientos documentados.",MEDIUM
 "El convenio se sujetará al presupuesto asignado.",LOW
 "Todas las contrataciones estarán condicionadas a disponibilidad presupuestaria.",LOW
 "Las adquisiciones se supeditan al techo presupuestario vigente.",LOW
@@ -44,19 +96,17 @@ text,severity
 "El presupuesto se administrará conforme a norma vigente.",LOW
 "Las solicitudes quedarán subordinadas a la existencia de partidas.",LOW
 "Se requerirá certificación presupuestaria previa.",LOW
-"Se prevé un esquema de precios exclusivos a favor del contratante.",HIGH
-"Se aplicarán precios selectivos en beneficio de la entidad.",HIGH
-"El proveedor otorgará precios exclusivos para esta entidad.",HIGH
-"Se establece tratamiento preferencial de precios para el contratante.",HIGH
-"Se reconocerán precios diferenciados a favor de la entidad pública.",HIGH
-"Precios exclusivos serán válidos durante la vigencia del convenio.",HIGH
-"Se autoriza un plan de precios preferentes para la administración.",HIGH
-"Habrá precios especiales reservados para esta entidad.",HIGH
-"Se admitirán descuentos exclusivos para pedidos de la entidad.",HIGH
-"Se habilita una tabla de precios preferidos a favor del contratante.",HIGH
-"Los pedidos deberán cumplir una cantidad mínima acordada.",MEDIUM
-"Se exigirá una orden mínima por transacción.",MEDIUM
-"Se permite mayor número de reemisiones que el habitual.",MEDIUM
-"Las reemisiones se incrementan por encima del límite corriente.",MEDIUM
 "Las órdenes dependen de la disponibilidad presupuestaria.",LOW
 "Ejecutar gastos estará condicionado al presupuesto aprobado.",LOW
+"Se condiciona la ejecución a la existencia de recursos asignados.",LOW
+"Se prohíbe comprometer gasto sin respaldo presupuestario.",LOW
+"Se sujetan los pagos a la programación financiera vigente.",LOW
+"Los desembolsos se realizarán conforme a la certificación de partidas.",LOW
+"Las erogaciones quedarán limitadas al techo presupuestario.",LOW
+"Se restringe el gasto de acuerdo con la asignación aprobada.",LOW
+"Las compras se efectuarán en función de los recursos disponibles.",LOW
+"Se supedita cualquier compromiso al crédito presupuestario.",LOW
+"Los pedidos requerirán constancia de disponibilidad presupuestaria.",LOW
+"Los compromisos se contraerán dentro del presupuesto autorizado.",LOW
+"Se impedirá la ejecución si no hay certificación presupuestaria.",LOW
+"Se respetará el límite presupuestario en todas las contrataciones.",LOW

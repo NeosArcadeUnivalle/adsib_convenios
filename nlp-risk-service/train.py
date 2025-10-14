@@ -1,104 +1,146 @@
-# train.py  (backend por defecto: tfidf)
-import argparse, os, json
+# train.py  (backend por defecto: tfidf mejorado)
+# -----------------------------------------------
+# - Mezcla n-gramas de palabra (1-3) y carácter (3-5)
+# - Normaliza acentos (strip_accents='unicode') y minúsculas
+# - LinearSVC + CalibratedClassifierCV para probabilidades/“confianza”
+# - Parámetros ajustables por CLI
+ 
+import argparse
 from pathlib import Path
-
-import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import make_pipeline, FeatureUnion
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.svm import LinearSVC
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import classification_report
 import joblib
-
+ 
 # Opcional SBERT si eliges backend sbert
 def _maybe_import_sbert():
     from sentence_transformers import SentenceTransformer
     return SentenceTransformer
-
+ 
 def read_seed(path):
     df = pd.read_csv(path)
-    cols = set(c.strip().lower() for c in df.columns)
-    if not {"text","severity"} <= cols:
+    cols = {c.strip().lower(): c for c in df.columns}
+    if not {"text", "severity"} <= set(cols.keys()):
         raise ValueError("El CSV debe tener columnas 'text' y 'severity'.")
-    df = df[["text","severity"]].dropna()
+    df = df[[cols["text"], cols["severity"]]].dropna()
+    df.columns = ["text", "severity"]
     df["text"] = df["text"].astype(str)
     df["severity"] = df["severity"].str.upper().str.strip()
     return df
-
+ 
 def read_rules(path):
-    if not path or not Path(path).exists():
-        return pd.DataFrame(columns=["text","severity"])
-    df = pd.read_csv(path)
-    # dataset_rules.csv venía con muchas columnas; nos quedamos con text y severity si existen
-    cols = {c.lower():c for c in df.columns}
+    p = Path(path) if path else None
+    if not p or not p.exists():
+        return pd.DataFrame(columns=["text", "severity"])
+    df = pd.read_csv(p)
+    cols = {c.lower(): c for c in df.columns}
     if "text" in cols and "severity" in cols:
         out = df[[cols["text"], cols["severity"]]].dropna()
-        out.columns = ["text","severity"]
+        out.columns = ["text", "severity"]
         out["severity"] = out["severity"].str.upper().str.strip()
         return out
-    return pd.DataFrame(columns=["text","severity"])
-
+    return pd.DataFrame(columns=["text", "severity"])
+ 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", required=True, help="CSV con columnas text,severity")
-    ap.add_argument("--rules", default="app/data/dataset_rules.csv", help="CSV débil (opcional)")
+    ap.add_argument("--rules", default="", help="CSV débil (opcional)")
     ap.add_argument("--out_dir", default="models")
-    ap.add_argument("--backend", choices=["tfidf","sbert"], default="tfidf")
+    ap.add_argument("--backend", choices=["tfidf", "sbert"], default="tfidf")
     ap.add_argument("--embedder", default="paraphrase-multilingual-MiniLM-L12-v2",
                     help="Nombre SBERT (si backend=sbert)")
+    # Ajustes finos opcionales
+    ap.add_argument("--max_features", type=int, default=12000)
+    ap.add_argument("--min_df", type=int, default=1)
+    ap.add_argument("--val_size", type=float, default=0.2)
     args = ap.parse_args()
-
+ 
     df = read_seed(args.seed)
     weak = read_rules(args.rules)
     data = pd.concat([df, weak], ignore_index=True)
+ 
     if len(data) < 10:
         print(f"Advertencia: dataset pequeño ({len(data)} filas)")
+ 
     X = data["text"].tolist()
     y = data["severity"].tolist()
-
+ 
     le = LabelEncoder()
     y_enc = le.fit_transform(y)
-
-    X_train, X_val, y_train, y_val = train_test_split(X, y_enc, test_size=0.2, random_state=42, stratify=y_enc)
-
+ 
+    X_train, X_val, y_train, y_val = train_test_split(
+        X, y_enc, test_size=args.val_size, random_state=42, stratify=y_enc
+    )
+ 
     if args.backend == "tfidf":
-        # Pipeline completo: TF-IDF (1-2-gramas) + Regresión Logística
-        clf = make_pipeline(
-            TfidfVectorizer(ngram_range=(1,2), max_features=8000, min_df=1),
-            LogisticRegression(max_iter=2000, class_weight="balanced", n_jobs=None)
+        # --- TF-IDF mejorado: palabra (1-3) + carácter (3-5) ---
+        word_tfidf = TfidfVectorizer(
+            analyzer="word",
+            ngram_range=(1, 3),
+            max_features=args.max_features,
+            min_df=args.min_df,
+            sublinear_tf=True,
+            lowercase=True,
+            strip_accents="unicode"  # quita tildes
         )
+        char_tfidf = TfidfVectorizer(
+            analyzer="char_wb",
+            ngram_range=(3, 5),
+            min_df=2,
+            lowercase=True,
+            strip_accents="unicode"
+        )
+        features = FeatureUnion([
+            ("w", word_tfidf),
+            ("c", char_tfidf),
+        ])
+ 
+        base = LinearSVC(class_weight="balanced")  # buen rendimiento en texto disperso
+        clf = make_pipeline(
+            features,
+            CalibratedClassifierCV(base, cv=3)  # densidad/calibración de probas
+        )
+ 
         clf.fit(X_train, y_train)
         y_pred = clf.predict(X_val)
         print(classification_report(y_val, y_pred, target_names=list(le.classes_)))
+ 
         bundle = {
             "clf": clf,
             "label_encoder": le,
-            "embedder_name": "tfidf-pipeline"  # <- importante para la API
+            "embedder_name": "tfidf-pipeline"
         }
-
+ 
     else:
-        # SBERT (solo si tienes HuggingFace funcionando)
+        # --- SBERT + LinearSVC calibrado (cuando quieras dar el salto semántico) ---
         SentenceTransformer = _maybe_import_sbert()
         embedder = SentenceTransformer(args.embedder)
+        import numpy as np
         E_train = embedder.encode(X_train, convert_to_numpy=True, normalize_embeddings=True)
         E_val   = embedder.encode(X_val,   convert_to_numpy=True, normalize_embeddings=True)
-        clf = LogisticRegression(max_iter=2000, class_weight="balanced")
+ 
+        base = LinearSVC(class_weight="balanced")
+        clf = CalibratedClassifierCV(base, cv=3)
         clf.fit(E_train, y_train)
         y_pred = clf.predict(E_val)
         print(classification_report(y_val, y_pred, target_names=list(le.classes_)))
+ 
         bundle = {
             "clf": clf,
             "label_encoder": le,
-            "embedder_name": args.embedder  # la API cargará este modelo SBERT
+            "embedder_name": args.embedder
         }
-
+ 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     joblib.dump(bundle, out_dir / "risk_head.joblib")
     print(f"\nOK -> modelo guardado en {out_dir/'risk_head.joblib'}")
     print("Clases:", list(le.classes_))
-
+ 
 if __name__ == "__main__":
     main()
