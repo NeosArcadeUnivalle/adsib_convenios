@@ -275,18 +275,26 @@ class AnalisisController extends Controller
         $convenioId = $request->query('convenio_id');
         $perPage    = (int) ($request->query('per') ?? 10);
         $page       = (int) ($request->query('page') ?? 1);
-
+    
         if (!$convenioId) {
             return response()->json(['message' => 'convenio_id es requerido'], 422);
         }
-
+    
         $query = DB::table('analisis_riesgos')
             ->where('convenio_id', $convenioId)
             ->orderByDesc('analizado_en');
-
+    
         $total = (clone $query)->count();
-        $items = $query->forPage($page, $perPage)->get();
-
+    
+        // Traemos y convertimos fechas a ISO-8601 con zona horaria explícita
+        $rawItems = $query->forPage($page, $perPage)->get();
+        $items = $rawItems->map(function ($r) {
+            $r->analizado_en = \Carbon\Carbon::parse($r->analizado_en)->toIso8601String();
+            $r->created_at   = \Carbon\Carbon::parse($r->created_at)->toIso8601String();
+            $r->updated_at   = \Carbon\Carbon::parse($r->updated_at)->toIso8601String();
+            return $r;
+        });
+    
         return response()->json([
             'data' => $items,
             'meta' => [

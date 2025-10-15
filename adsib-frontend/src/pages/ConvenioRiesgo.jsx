@@ -1,11 +1,9 @@
 // resources/js/pages/ConvenioRiesgo.jsx
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import api from "../api";
 
 /* =================== Paletas =================== */
-
 const RISK = {
   ALTO:    { bg: "#991b1b", fg: "#fff", label: "ALTO"  },
   MEDIO:   { bg: "#92400e", fg: "#fff", label: "MEDIO" },
@@ -20,6 +18,12 @@ const SEV = {
   LOW:    { bg: "#10b981", fg: "#0b2f26", label: "BAJO" },
   NONE:   { bg: "#6b7280", fg: "#fff", label: "N/A" }
 };
+const RING = {
+  HIGH:   "rgba(220,38,38,.45)",
+  MEDIUM: "rgba(245,158,11,.45)",
+  LOW:    "rgba(16,185,129,.45)",
+  NONE:   "rgba(107,114,128,.35)"
+};
 
 const SEMANTIC = { bg: "#60a5fa", fg: "#0b213c", ring: "rgba(96,165,250,.35)" };
 
@@ -31,24 +35,22 @@ const BTN = {
 };
 
 /* =================== helpers =================== */
-
 const normalize = (s="") => s.replace(/\r/g,"").replace(/[ \t]+\n/g,"\n").trim();
 const esc = (s="") => s.replace(/[&<>"']/g, (m) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
 const stripAccents = (s="") => s.normalize?.("NFD").replace(/[\u0300-\u036f]/g,"") ?? s;
 
 const styleFromMatch = (m) => {
   const sev = (m?.severity || "NONE").toUpperCase();
-  if (m?.source === "semantic") {
+  if ((m?.source || "").toLowerCase() === "semantic") {
     return { bg: SEMANTIC.bg, fg: SEMANTIC.fg, ring: SEMANTIC.ring, kind:"semantic", severity: sev };
   }
   return { ...(SEV[sev] || SEV.NONE), kind:"rule", severity: sev };
 };
 
-/** Mapa token -> estilo. Anticipación manda sobre reglas. */
+/** Mapa token -> estilo (anticipación > regla; mayor severidad > menor). */
 function buildTokenStyles(matches=[]) {
   const map = new Map();
   const rank = { HIGH:3, MEDIUM:2, LOW:1, NONE:0 };
-
   const put = (key, base) => {
     const prev = map.get(key);
     if (!prev) { map.set(key, base); return; }
@@ -56,38 +58,58 @@ function buildTokenStyles(matches=[]) {
     if (prev.kind === "semantic" && base.kind !== "semantic") { return; }
     if (rank[base.severity] > rank[prev.severity]) map.set(key, base);
   };
-
   matches.forEach(m => {
-    const token = (m.token || "").trim(); if (!token) return;
+    const token = (m.token || "").trim();
+    if (!token) return;
     const base = styleFromMatch(m);
     const k1 = token.toLowerCase();
     const k2 = stripAccents(k1);
     put(k1, base); if (k2 !== k1) put(k2, base);
   });
-
   return map;
 }
 
-/** Fragmentos a partir de matches (mantienen su estilo). */
+/** RegExp tolerante a espacios/acentos para un token. */
+const tokenRegex = (token) => {
+  const t = stripAccents(String(token).toLowerCase());
+  const escTok = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+  return new RegExp(escTok, "gi");
+};
+
+/** Snippets: usa offsets si existen; si no, cae a regex. Devuelve el rango absoluto del fragmento. */
 function makeSnippetsFromMatches(text="", matches=[], max=24) {
   const out = [];
-  const lowerNoAcc = stripAccents(text.toLowerCase());
+  const base = stripAccents(text).toLowerCase();
   const seen = new Set();
 
   for (const m of matches || []) {
+    const st = styleFromMatch(m);
+
+    // --- con offsets exactos ---
+    if (Number.isInteger(m.start) && Number.isInteger(m.end) && m.end > m.start) {
+      const s = Math.max(0, m.start), e = Math.min(text.length, m.end);
+      const ctxS = Math.max(0, text.lastIndexOf("\n", s-1) !== -1 ? text.lastIndexOf("\n", s-1) : s-160);
+      const ctxE = Math.min(text.length, text.indexOf("\n", e) !== -1 ? text.indexOf("\n", e) : e+220);
+      const raw = text.slice(ctxS, ctxE).trim();
+      const key = `${s}-${e}||${raw}`;
+      if (!seen.has(key)) { seen.add(key); out.push({ token: m.token || "", raw, style: st, startAbs: ctxS, endAbs: ctxE }); }
+      if (out.length >= max) break;
+      continue;
+    }
+
+    // --- sin offsets: regex flexible ---
     const tok = (m.token || "").trim(); if (!tok) continue;
-    const t = stripAccents(tok.toLowerCase());
-    const pos = lowerNoAcc.indexOf(t);
-    if (pos === -1) continue;
-
-    const start = Math.max(0, lowerNoAcc.lastIndexOf("\n", pos-1) !== -1 ? lowerNoAcc.lastIndexOf("\n", pos-1) : pos-120);
-    const end   = Math.min(text.length, lowerNoAcc.indexOf("\n", pos+t.length) !== -1 ? lowerNoAcc.indexOf("\n", pos+t.length) : pos+t.length+160);
-    const raw   = text.slice(start, end).trim();
-
-    const key = tok.toLowerCase() + "||" + raw;
-    if (seen.has(key)) continue; seen.add(key);
-
-    out.push({ token: tok, raw, style: styleFromMatch(m) });
+    const re  = tokenRegex(tok);
+    let mt;
+    while ((mt = re.exec(base)) !== null) {
+      const sIdx = mt.index, eIdx = sIdx + mt[0].length;
+      const ctxS = Math.max(0, text.lastIndexOf("\n", sIdx-1) !== -1 ? text.lastIndexOf("\n", sIdx-1) : sIdx-160);
+      const ctxE = Math.min(text.length, text.indexOf("\n", eIdx) !== -1 ? text.indexOf("\n", eIdx) : eIdx+220);
+      const raw  = text.slice(ctxS, ctxE).trim();
+      const key  = tok.toLowerCase() + "||" + raw;
+      if (!seen.has(key)) { seen.add(key); out.push({ token: tok, raw, style: st, startAbs: ctxS, endAbs: ctxE }); }
+      if (out.length >= max) break;
+    }
     if (out.length >= max) break;
   }
   return out;
@@ -112,84 +134,79 @@ function matchDensity(text="", tokens=[]) {
   return Math.min(1, total / Math.max(1, text.length));
 }
 
-/* ==== Highlighter por rangos (usa matches) ==== */
-
-/** Genera HTML resaltado combinando coincidencias con prioridad (semantic > reglas). */
+/* ==== Highlighter con offsets + regex; superposición (underline azul para anticipación) ==== */
 function highlightByMatches(text="", matches=[], extraQuery="") {
   if (!text) return { __html: "" };
-
   const n = text.length;
-  if (n === 0) return { __html: "" };
+  const base = stripAccents(text).toLowerCase();
 
-  // string sin acentos para buscar
-  const noAcc = stripAccents(text);
+  // dos capas
+  const primary = new Array(n).fill(null);
+  const hasSem  = new Array(n).fill(false);
   const sevRank = { HIGH:3, MEDIUM:2, LOW:1, NONE:0 };
-  const prio = (st) => st.kind === "semantic" ? 100 + sevRank[st.severity || "NONE"] : (st.kind === "extra" ? 0 : sevRank[st.severity || "NONE"]);
 
-  // construir rangos en índices del string original
-  const ranges = [];
-  const pushToken = (tok, st) => {
-    if (!tok) return;
-    const t = stripAccents(tok.toLowerCase());
-    if (!t) return;
-    let idx = 0;
-    while (idx < noAcc.length) {
-      const p = noAcc.toLowerCase().indexOf(t, idx);
-      if (p === -1) break;
-      const s = p;
-      const e = p + t.length;
-      if (e > s) ranges.push({ start:s, end:e, style: st });
-      idx = p + t.length;
-    }
+  const paint = (s,e,st) => {
+    const S = Math.max(0, s), E = Math.min(n, e);
+    for (let i=S;i<E;i++){ if (!primary[i]) primary[i]=st; if (st.kind==="semantic") hasSem[i]=true; }
   };
 
-  (matches || []).forEach(m => pushToken(m.token, styleFromMatch(m)));
-  if (extraQuery) {
-    const st = { bg:"#fef3c7", fg:"#111827", kind:"extra", severity:"NONE" };
-    pushToken(extraQuery, st);
-  }
+  const ranges = [];
+  const addRange = (s,e,st) => { if (Number.isFinite(s)&&Number.isFinite(e)&&e>s) ranges.push({s,e,st}); };
 
-  if (ranges.length === 0) return { __html: esc(text) };
-
-  // ordenar por prioridad y longitud
-  ranges.sort((a,b)=>{
-    const pa = prio(a.style), pb = prio(b.style);
-    if (pb !== pa) return pb - pa;
-    const la = (a.end - a.start), lb = (b.end - b.start);
-    return lb - la || a.start - b.start;
+  (matches || []).forEach(m => {
+    const st = styleFromMatch(m);
+    if (Number.isInteger(m.start) && Number.isInteger(m.end) && m.end > m.start) {
+      addRange(m.start, m.end, st);
+      return;
+    }
+    const tok = (m.token || "").trim(); if (!tok) return;
+    const re = tokenRegex(tok);
+    let mt; while ((mt = re.exec(base)) !== null) {
+      addRange(mt.index, mt.index + mt[0].length, st);
+      re.lastIndex = mt.index + Math.max(1, mt[0].length);
+    }
   });
 
-  // capa de estilos por carácter (prioridad primero)
-  const layer = new Array(n).fill(null);
-  for (const r of ranges) {
-    for (let i = Math.max(0, r.start); i < Math.min(n, r.end); i++) {
-      if (layer[i] == null) layer[i] = r.style;
+  if (extraQuery) {
+    const re = tokenRegex(extraQuery);
+    let mt; while ((mt = re.exec(base)) !== null) {
+      addRange(mt.index, mt.index + mt[0].length, { bg:"#fef3c7", fg:"#111827", kind:"extra", severity:"NONE" });
+      re.lastIndex = mt.index + Math.max(1, mt[0].length);
     }
   }
 
-  // construir HTML
-  let html = "";
-  let open = null;
-  const openTag = (st) => {
-    const ring = st.ring ? `;box-shadow:0 0 0 2px ${st.ring} inset` : "";
-    return `<mark style="background:${st.bg};color:${st.fg};border-radius:4px;padding:0 2px${ring}">`;
-  };
+  ranges.sort((a,b)=>{
+    const A=a.st,B=b.st;
+    const rA = A.kind==="rule" ? (10+(sevRank[A.severity]||0)) : (A.kind==="semantic"?5:0);
+    const rB = B.kind==="rule" ? (10+(sevRank[B.severity]||0)) : (B.kind==="semantic"?5:0);
+    if (rB!==rA) return rB-rA;
+    const la=a.e-a.s, lb=b.e-b.s;
+    return lb-la || a.s-b.s;
+  });
 
-  for (let i=0;i<n;i++) {
-    const st = layer[i];
-    if (st !== open) {
+  ranges.forEach(r=>paint(r.s,r.e,r.st));
+  let html="", open=null;
+  const openTag = (st, underline) => {
+    const ring = st.ring ? `;box-shadow:0 0 0 2px ${st.ring} inset` : "";
+    const under = underline ? `;box-shadow: inset 0 -2px 0 0 ${SEMANTIC.bg}${ring}` : `${ring}`;
+    return `<mark style="background:${st.bg};color:${st.fg};border-radius:4px;padding:0 2px${under}">`;
+  };
+  for (let i=0;i<n;i++){
+    const st = primary[i];
+    const underline = hasSem[i] && (!st || st.kind!=="semantic");
+    const key = st ? (st.kind+"|"+st.severity+"|"+(underline?"1":"0")) : null;
+    const cur = open ? (open.kind+"|"+open.severity+"|"+(open.__ul?"1":"0")) : null;
+    if (key!==cur){
       if (open) html += "</mark>";
-      if (st) html += openTag(st);
-      open = st;
+      if (st){ html += openTag(st, underline); open = { ...st, __ul: underline }; } else { open=null; }
     }
     html += esc(text[i]);
   }
   if (open) html += "</mark>";
-
   return { __html: html };
 }
 
-/* ===== Helpers amigables para historial ===== */
+/* ===== Helpers amigables ===== */
 const modelFriendly = (m = "") => {
   const x = (m || "").toLowerCase();
   if (x.includes("tfidf")) return "búsqueda semántica (TF-IDF)";
@@ -198,11 +215,18 @@ const modelFriendly = (m = "") => {
   if (x.includes("rules")) return "reglas (palabras clave)";
   return m || "motor desconocido";
 };
-const fmtPct   = (n) => (Math.max(0, Math.min(1, Number(n ?? 0))) * 100).toFixed(0) + "%";
-const fmtFecha = (s) => { try { return new Date(s).toLocaleString(); } catch { return s || "—"; } };
+
+/** Formateo de fecha en *tu* zona: si no hay offset/Z, se toma como local */
+const fmtFecha = (s) => {
+  if (!s) return "—";
+  const isoish = s.includes("T") ? s : s.replace(" ", "T");
+  try {
+    const d = new Date(isoish); // sin Z => local, con Z => UTC
+    return isNaN(d.getTime()) ? s : d.toLocaleString();
+  } catch { return s; }
+};
 
 /* =================== Página =================== */
-
 export default function ConvenioRiesgo(){
   const { id } = useParams();
 
@@ -217,11 +241,10 @@ export default function ConvenioRiesgo(){
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
   const [page, setPage] = useState(1);
-  const [histMeta, setHistMeta] = useState({ page: 1, per: 5, total: 0 });
+  const [histMeta, setHistMeta] = useState({ page: 1, per: 3, total: 0 });
 
   const [q, setQ] = useState("");
 
-  // ----- carga convenio + versiones -----
   const load = useCallback(async () => {
     const [a, b] = await Promise.all([
       api.get(`/convenios/${id}`),
@@ -232,7 +255,6 @@ export default function ConvenioRiesgo(){
     setVersiones(arr);
     if (arr.length) setSel(String(arr[0].id));
   }, [id]);
-
   useEffect(()=>{ load(); }, [load]);
 
   const loadText = useCallback(async (vid) => {
@@ -253,13 +275,13 @@ export default function ConvenioRiesgo(){
     if (!conv?.id) return;
     try {
       const { data } = await api.get('/analisis', {
-        params: { convenio_id: conv.id, page: p, per: 5 }
+        params: { convenio_id: conv.id, page: p, per: 3 }
       });
       const items = Array.isArray(data?.data) ? data.data : [];
       setHistory(items);
       setHistMeta({
         page: data?.meta?.page || p,
-        per:  data?.meta?.per  || 5,
+        per:  data?.meta?.per  || 3,
         total: data?.meta?.total || 0
       });
       setPage(data?.meta?.page || p);
@@ -292,29 +314,29 @@ export default function ConvenioRiesgo(){
     }
   }, [texto, sel, conv?.id, loadHistory]);
 
-  /* ====== derivados para UI ====== */
   const matchesFull = useMemo(() => result?.matches || [], [result]);
   const tokenStyles = useMemo(() => buildTokenStyles(matchesFull), [matchesFull]);
 
   const allTokens      = useMemo(() => [...tokenStyles.keys()], [tokenStyles]);
   const semanticTokens = useMemo(
-    () => matchesFull.filter(m=>m.source==="semantic").map(m=>stripAccents((m.token||"").toLowerCase())),
+    () => matchesFull.filter(m=>String(m.source).toLowerCase()==="semantic")
+                     .map(m=>stripAccents((m.token||"").toLowerCase())),
     [matchesFull]
   );
   const ruleTokens     = useMemo(
-    () => matchesFull.filter(m=>m.source!=="semantic").map(m=>stripAccents((m.token||"").toLowerCase())),
+    () => matchesFull.filter(m=>String(m.source).toLowerCase()!=="semantic")
+                     .map(m=>stripAccents((m.token||"").toLowerCase())),
     [matchesFull]
   );
 
-  const tokenTable = useMemo(() => countTokens(allTokens), [allTokens]);
   const snippets   = useMemo(() => makeSnippetsFromMatches(texto, matchesFull, 24), [texto, matchesFull]);
+  const tokenTable = useMemo(() => countTokens(allTokens), [allTokens]);
   const density    = useMemo(() => matchDensity(texto, allTokens), [texto, allTokens]);
 
-  // Copiar resumen (se define DESPUÉS de tener los memos para evitar "no-undef")
-  const copyResumen = useCallback(async () => {
+  const copyResumen = async () => {
     const lvl = result?.risk_level || "—";
     const score = result?.score ?? 0;
-    const vObj = (versiones || []).find(v=>String(v.id)===String(sel));
+    const vObj = versiones.find(v=>String(v.id)===String(sel));
     const lines = [
       `Convenio: ${conv?.titulo || id}`,
       `Versión: v${vObj?.numero_version || "—"}`,
@@ -326,82 +348,81 @@ export default function ConvenioRiesgo(){
     ];
     try { await navigator.clipboard.writeText(lines.join("\n")); alert("Resumen copiado."); }
     catch { alert("No se pudo copiar."); }
-  }, [result, versiones, sel, conv?.titulo, id, ruleTokens.length, semanticTokens.length, density]);
+  };
 
-  /* ====== render ====== */
   const lvl = levelStyle(result?.risk_level);
   const scorePct = Math.max(0, Math.min(1, Number(result?.score ?? 0))) * 100;
-  const totalPages = Math.max(1, Math.ceil((histMeta.total || 0) / (histMeta.per || 5)));
+  const totalPages = Math.max(1, Math.ceil((histMeta.total || 0) / (histMeta.per || 3)));
 
   return (
-    <div className="card" style={{ padding: 20 }}>
+    <div className="card" style={{ padding: 18 }}>
       {/* header */}
-      <div style={{display:"flex", alignItems:"center", gap:10, flexWrap:"wrap", marginBottom:6}}>
+      <div style={{display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:6}}>
         <Link to={`/convenios/${id}`} className="btn" style={BTN.back}>Volver al convenio</Link>
-        <h2 style={{margin:0}}>Análisis de riesgo — {conv?.titulo || "..."}</h2>
+        <h2 style={{margin:0, fontSize:18}}>Análisis de riesgo — {conv?.titulo || "..."}</h2>
       </div>
 
       {/* filtros */}
-      <div className="card" style={{display:"flex", gap:10, alignItems:"center", flexWrap:"wrap"}}>
-        <label>Versión:</label>
-        <select value={sel} onChange={e=>setSel(e.target.value)}>
+      <div className="card" style={{display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", padding:8}}>
+        <label style={{fontSize:13}}>Versión:</label>
+        <select value={sel} onChange={e=>setSel(e.target.value)} style={{fontSize:13}}>
           {(versiones || []).map(v => <option key={v.id} value={v.id}>v{v.numero_version}</option>)}
         </select>
         <button className="btn" style={{...BTN.primary, ...(loading ? BTN.disabled: {})}} disabled={loading} onClick={analizar}>
           {loading ? "Analizando..." : "Analizar"}
         </button>
 
-        <div style={{marginLeft:"auto", display:"flex", gap:12, alignItems:"center"}}>
-          <div style={{display:"flex", gap:8, alignItems:"center", fontSize:12, opacity:.9}}>
+        <div style={{marginLeft:"auto", display:"flex", gap:10, alignItems:"center"}}>
+          <div style={{display:"flex", gap:6, alignItems:"center", fontSize:11, opacity:.9}}>
             <span style={{background:SEV.HIGH.bg, color:SEV.HIGH.fg, padding:"2px 6px", borderRadius:6}}>directo ALTO</span>
             <span style={{background:SEV.MEDIUM.bg, color:SEV.MEDIUM.fg, padding:"2px 6px", borderRadius:6}}>directo MEDIO</span>
             <span style={{background:SEV.LOW.bg, color:SEV.LOW.fg, padding:"2px 6px", borderRadius:6}}>directo BAJO</span>
             <span style={{background:SEMANTIC.bg, color:SEMANTIC.fg, padding:"2px 6px", borderRadius:6}}>anticipación</span>
           </div>
-          <input placeholder="Buscar en texto…" value={q} onChange={e=>setQ(e.target.value)} style={{minWidth:240}} />
+          <input placeholder="Buscar en texto…" value={q} onChange={e=>setQ(e.target.value)} style={{minWidth:220, fontSize:13}} />
         </div>
       </div>
 
-      {err && <div className="card" style={{marginTop:8, borderColor:"#b91c1c", color:"#fee2e2", background:"#7f1d1d"}}>{err}</div>}
+      {err && <div className="card" style={{marginTop:8, borderColor:"#b91c1c", color:"#fee2e2", background:"#7f1d1d", fontSize:13, padding:8}}>{err}</div>}
 
       {/* resumen */}
-      <div className="card" style={{marginTop:10}}>
-        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:14}}>
+      <div className="card" style={{marginTop:8, padding:10}}>
+        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12}}>
           <div>
-            <div style={{display:"flex", gap:8, alignItems:"center", flexWrap:"wrap"}}>
-              <span style={{ padding:"6px 12px", borderRadius:8, background:lvl.bg, color:lvl.fg, fontWeight:700 }}>
+            <div style={{display:"flex", gap:6, alignItems:"center", flexWrap:"wrap"}}>
+              <span style={{ padding:"5px 10px", borderRadius:8, background:lvl.bg, color:lvl.fg, fontWeight:700, fontSize:13 }}>
                 Nivel: {lvl.label}
               </span>
-              <span className="pill">Directos: {ruleTokens.length}</span>
-              <span className="pill">Anticipaciones: {semanticTokens.length}</span>
-              <span className="pill">Densidad: {(density*100).toFixed(1)}%</span>
+              <span className="pill" style={{fontSize:12}}>Directos: {ruleTokens.length}</span>
+              <span className="pill" style={{fontSize:12}}>Anticipaciones: {semanticTokens.length}</span>
+              <span className="pill" style={{fontSize:12}}>Densidad: {(density*100).toFixed(1)}%</span>
             </div>
 
-            <div style={{marginTop:10}}>
-              <div style={{display:"flex", alignItems:"center", justifyContent:"space-between"}}>
+            <div style={{marginTop:8}}>
+              <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", fontSize:12}}>
                 <span style={{opacity:.9}}>Confianza</span>
                 <b>{(scorePct/100).toFixed(2)}</b>
               </div>
-              <div style={{height:10, background:"#111827", borderRadius:999, marginTop:6}}>
+              <div style={{height:8, background:"#111827", borderRadius:999, marginTop:6}}>
                 <div style={{ width:`${scorePct}%`, height:"100%", background:lvl.bg, borderRadius:999, transition:"width .2s" }}/>
               </div>
             </div>
 
-            <div style={{marginTop:10, display:"flex", gap:8, flexWrap:"wrap"}}>
-              <button className="btn" style={BTN.neutral} onClick={copyResumen}>Copiar resumen</button>
+            <div style={{marginTop:8, display:"flex", gap:6, flexWrap:"wrap"}}>
+              <button className="btn" style={{...BTN.neutral, padding:"6px 10px", fontSize:12}} onClick={copyResumen}>Copiar resumen</button>
             </div>
           </div>
 
           {/* chips */}
           <div>
-            <div style={{fontWeight:600, marginBottom:6}}>Palabras/expresiones detectadas</div>
+            <div style={{fontWeight:600, marginBottom:6, fontSize:13}}>Palabras/expresiones detectadas</div>
             {tokenTable.length === 0 ? (
-              <div style={{opacity:.8}}>—</div>
+              <div style={{opacity:.8, fontSize:12}}>—</div>
             ) : (
-              <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
+              <div style={{display:"flex", gap:6, flexWrap:"wrap"}}>
                 {tokenTable.map(k => {
                   const st = tokenStyles.get(k.token) || { bg:"#111827", fg:"#e5e7eb" };
-                  const chipStyle = { background: st.bg, color: st.fg, padding:"4px 8px", borderRadius:8, display:"inline-flex", alignItems:"center", gap:6 };
+                  const chipStyle = { background: st.bg, color: st.fg, padding:"3px 6px", borderRadius:8, display:"inline-flex", alignItems:"center", gap:6, fontSize:12 };
                   const label = st.kind === "semantic" ? "anticipación" : (SEV[st.severity]?.label || "N/A");
                   return (
                     <span key={k.token} style={chipStyle}>
@@ -416,21 +437,21 @@ export default function ConvenioRiesgo(){
         </div>
       </div>
 
-      {/* HISTORIAL */}
-      <div className="card" style={{marginTop:10}}>
+      {/* HISTORIAL (3 items, compacto) */}
+      <div className="card" style={{marginTop:8, padding:10}}>
         <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-          <h3 style={{margin:0, fontSize:16}}>Historial de análisis</h3>
+          <h3 style={{margin:0, fontSize:15}}>Historial de análisis</h3>
         </div>
 
         {history.length === 0 ? (
-          <div style={{opacity:.8, marginTop:8}}>Aún no hay análisis registrados para este convenio.</div>
+          <div style={{opacity:.8, marginTop:8, fontSize:12}}>Aún no hay análisis registrados para este convenio.</div>
         ) : (
           <>
-            <div style={{marginTop:10, display:"grid", gap:10}}>
+            <div style={{marginTop:8, display:"grid", gap:8}}>
               {history.map((h) => {
                 const fecha = fmtFecha(h.analizado_en || h.created_at);
                 const lvlH  = levelStyle(h.risk_level);
-                const confianza = fmtPct(h.score);
+                const confianza = Math.round((Math.max(0, Math.min(1, Number(h.score ?? 0)))) * 100) + "%";
                 const hallazgos = h.matches ?? 0;
                 const motor = modelFriendly(h.modelo);
 
@@ -438,29 +459,30 @@ export default function ConvenioRiesgo(){
                   <div key={h.id}
                     style={{
                       display:"grid",
-                      gridTemplateColumns:"180px 1fr",
-                      gap:12,
-                      padding:12,
+                      gridTemplateColumns:"150px 1fr",
+                      gap:8,
+                      padding:8,
                       border:"1px solid rgba(255,255,255,.08)",
                       borderRadius:10,
-                      background:"rgba(0,0,0,.25)"
+                      background:"rgba(0,0,0,.25)",
+                      fontSize:12
                     }}
                   >
                     <div>
-                      <div style={{opacity:.8, fontSize:12}}>{fecha}</div>
-                      <div style={{marginTop:6, display:"inline-block", padding:"6px 10px",
-                        borderRadius:8, background:lvlH.bg, color:lvlH.fg, fontWeight:700}}>
+                      <div style={{opacity:.8, fontSize:11}}>{fecha}</div>
+                      <div style={{marginTop:6, display:"inline-block", padding:"4px 8px",
+                        borderRadius:8, background:lvlH.bg, color:lvlH.fg, fontWeight:700, fontSize:11}}>
                         Riesgo: {lvlH.label}
                       </div>
                     </div>
 
-                    <div style={{display:"flex", flexWrap:"wrap", gap:10, alignItems:"center"}}>
+                    <div style={{display:"flex", flexWrap:"wrap", gap:8, alignItems:"center"}}>
                       <span className="pill">Confianza: <b>{confianza}</b></span>
-                      <span className="pill">Hallazgos totales: <b>{hallazgos}</b></span>
+                      <span className="pill">Hallazgos: <b>{hallazgos}</b></span>
                       <span className="pill">Método: <b>{motor}</b></span>
-                      <div style={{minWidth:160, flex:"0 0 auto"}}>
-                        <div style={{opacity:.8, fontSize:12, marginBottom:4}}>Nivel de confianza</div>
-                        <div style={{height:8, background:"#111827", borderRadius:999}}>
+                      <div style={{minWidth:140, flex:"0 0 auto"}}>
+                        <div style={{opacity:.8, fontSize:11, marginBottom:4}}>Nivel de confianza</div>
+                        <div style={{height:6, background:"#111827", borderRadius:999}}>
                           <div style={{ width: confianza, height:"100%", background:lvlH.bg, borderRadius:999 }}/>
                         </div>
                       </div>
@@ -470,7 +492,7 @@ export default function ConvenioRiesgo(){
               })}
             </div>
 
-            <div style={{display:'flex', justifyContent:'center', gap:12, marginTop:12, alignItems:'center'}}>
+            <div style={{display:'flex', justifyContent:'center', gap:10, marginTop:10, alignItems:'center', fontSize:12}}>
               <button className="btn" style={BTN.neutral} onClick={() => loadHistory(page - 1)} disabled={!(page>1)}>◀ Anterior</button>
               <span style={{opacity:.8}}>Página {page} de {totalPages}</span>
               <button className="btn" style={BTN.neutral} onClick={() => loadHistory(page + 1)} disabled={!(page < totalPages)}>Siguiente ▶</button>
@@ -480,39 +502,64 @@ export default function ConvenioRiesgo(){
       </div>
 
       {/* fragmentos relevantes */}
-      <div className="card" style={{marginTop:10}}>
+      <div className="card" style={{marginTop:8, padding:10}}>
         <div style={{display:"flex", alignItems:"center", justifyContent:"space-between"}}>
-          <h3 style={{margin:0, fontSize:16}}>Fragmentos relevantes</h3>
-          <span style={{opacity:.8}}>{snippets.length} fragmentos</span>
+          <h3 style={{margin:0, fontSize:15}}>Fragmentos relevantes</h3>
+          <span style={{opacity:.8, fontSize:12}}>{snippets.length} fragmentos</span>
         </div>
 
         {snippets.length === 0 ? (
-          <div style={{opacity:.8, marginTop:6}}>No se detectaron fragmentos relevantes.</div>
+          <div style={{opacity:.8, marginTop:6, fontSize:12}}>No se detectaron fragmentos relevantes.</div>
         ) : (
-          <div style={{display:"grid", gap:8, marginTop:8}}>
+          <div style={{display:"grid", gap:6, marginTop:8}}>
             {snippets.map((s,i)=>{
-              const st = s.style || { bg:"#111827", fg:"#e5e7eb", kind:"rule", severity:"NONE" };
-              const isSemantic = st.kind === "semantic";
-              const border = isSemantic ? `0 0 0 2px ${SEMANTIC.ring} inset` : "none";
+              const stMain = s.style || { bg:"#111827", fg:"#e5e7eb", kind:"rule", severity:"NONE" };
+              const isSemantic = stMain.kind === "semantic";
+              const ringColor = isSemantic ? SEMANTIC.ring : (RING[stMain.severity] || RING.NONE);
 
-              // Resaltar SOLO el token del fragmento con su estilo propio
-              const localHtml = highlightByMatches(
-                s.raw,
-                [{ token: s.token, source: isSemantic ? "semantic" : "rule", severity: st.severity }]
-              ).__html;
+              // --- SOLO su tipo: si es anticipación, solo anticipaciones; si es regla, solo esa severidad ---
+              const filterSameType = (m) => {
+                const ms = styleFromMatch(m);
+                if (isSemantic) return ms.kind === "semantic";
+                return ms.kind === "rule" && ms.severity === stMain.severity;
+              };
+
+              // matches que caen dentro del rango del fragmento -> offsets relativos
+              const localMatches = (matchesFull || []).flatMap(m => {
+                if (!filterSameType(m)) return [];
+                if (Number.isInteger(m.start) && Number.isInteger(m.end) && s.startAbs != null) {
+                  const ovStart = Math.max(m.start, s.startAbs);
+                  const ovEnd   = Math.min(m.end,   s.endAbs);
+                  if (ovEnd > ovStart) {
+                    return [{ ...m, start: ovStart - s.startAbs, end: ovEnd - s.startAbs }];
+                  }
+                  return [];
+                }
+                // sin offsets: incluir si el token aparece dentro del raw
+                const tok = (m.token || "").trim();
+                if (!tok) return [];
+                const re = tokenRegex(tok);
+                if (re.test(stripAccents(s.raw).toLowerCase())) {
+                  return [{ token: tok, source: m.source, severity: m.severity }];
+                }
+                return [];
+              });
+
+              const localHtml = highlightByMatches(s.raw, localMatches).__html;
 
               return (
                 <div key={i} style={{
                   border:"1px solid rgba(255,255,255,.08)",
                   borderRadius:8,
-                  padding:10,
+                  padding:8,
                   background:"rgba(0,0,0,.25)",
-                  boxShadow: border
+                  boxShadow:`0 0 0 2px ${ringColor} inset`,
+                  fontSize:13
                 }}>
-                  <div style={{fontSize:12, opacity:.9, marginBottom:6, display:"flex", gap:8, alignItems:"center"}}>
+                  <div style={{fontSize:11.5, opacity:.9, marginBottom:6, display:"flex", gap:6, alignItems:"center"}}>
                     #{i+1} · {s.token}
-                    <span style={{background: st.bg, color: st.fg, borderRadius:6, padding:"2px 6px", fontSize:11}}>
-                      {isSemantic ? "anticipación" : (SEV[st.severity]?.label || "N/A")}
+                    <span style={{background: stMain.bg, color: stMain.fg, borderRadius:6, padding:"2px 6px", fontSize:10.5}}>
+                      {isSemantic ? "anticipación" : (SEV[stMain.severity]?.label || "N/A")}
                     </span>
                   </div>
                   <div dangerouslySetInnerHTML={{ __html: localHtml }} />
@@ -524,10 +571,10 @@ export default function ConvenioRiesgo(){
       </div>
 
       {/* texto analizado */}
-      <div className="card" style={{marginTop:10}}>
-        <h3 style={{margin:0, fontSize:16}}>Texto analizado</h3>
+      <div className="card" style={{marginTop:8, padding:10}}>
+        <h3 style={{margin:0, fontSize:15}}>Texto analizado</h3>
         <div style={{
-          maxHeight:420, overflow:"auto", marginTop:8, padding:10,
+          maxHeight:420, overflow:"auto", marginTop:8, padding:8,
           border:"1px solid rgba(255,255,255,.08)", borderRadius:8,
           background:"rgba(0,0,0,.15)", whiteSpace:"pre-wrap",
           fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize:13
