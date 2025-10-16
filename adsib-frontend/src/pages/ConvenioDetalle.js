@@ -1,3 +1,4 @@
+// src/pages/ConvenioDetalle.js
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import api from "../api";
@@ -46,6 +47,7 @@ export default function ConvenioDetalle() {
   // nueva versión
   const [vFile, setVFile] = useState(null);
   const [observ, setObserv] = useState("");
+  const [finalizar, setFinalizar] = useState(false); // NUEVO: marcar versión final (cierra convenio)
   const [uploading, setUploading] = useState(false);
   const vInputRef = useRef(null);
 
@@ -112,6 +114,8 @@ export default function ConvenioDetalle() {
       await api.post(`/convenios/${id}/archivo`, fd);
       setArchivo(null);
       await loadConvenio();
+      // Si tu backend genera versión base aparte, descomenta:
+      // await loadPage(1);
     } catch (err) {
       alert(err.response?.data?.message || "Error al subir archivo");
     } finally {
@@ -152,7 +156,8 @@ export default function ConvenioDetalle() {
 
     const fd = new FormData();
     fd.append("archivo", vFile);
-    if (observ) fd.append("observaciones", observ);
+    if (observ)    fd.append("observaciones", observ);
+    if (finalizar) fd.append("final", "1");
 
     try {
       setUploading(true);
@@ -162,7 +167,11 @@ export default function ConvenioDetalle() {
       // limpiar input y campos
       setVFile(null);
       setObserv("");
+      setFinalizar(false);
       if (vInputRef.current) vInputRef.current.value = "";
+
+      // recargar cabecera (puede cambiar estado a CERRADO)
+      await loadConvenio();
 
       // Si estoy en la página 1, inserto en vivo
       if (page === 1 && nueva) {
@@ -177,7 +186,6 @@ export default function ConvenioDetalle() {
           };
         });
       } else {
-        // Si estoy en otra página, voy a la 1 y recargo
         setPage(1);
         await loadPage(1);
       }
@@ -227,12 +235,8 @@ export default function ConvenioDetalle() {
     }
   };
 
-  const goPrev = () => {
-    if (page > 1) loadPage(page - 1);
-  };
-  const goNext = () => {
-    if (page < (meta.last_page || 1)) loadPage(page + 1);
-  };
+  const goPrev = () => { if (page > 1) loadPage(page - 1); };
+  const goNext = () => { if (page < (meta.last_page || 1)) loadPage(page + 1); };
 
   return (
     <div className="card" style={{ padding:20 }}>
@@ -311,6 +315,10 @@ export default function ConvenioDetalle() {
             onChange={(e)=>setObserv(e.target.value)}
             style={{minWidth:240}}
           />
+          <label style={{display:"inline-flex", alignItems:"center", gap:6}}>
+            <input type="checkbox" checked={finalizar} onChange={(e)=>setFinalizar(e.target.checked)} />
+            Marcar como versión final (cerrar convenio)
+          </label>
           <button
             type="submit"
             className="btn"
@@ -343,7 +351,7 @@ export default function ConvenioDetalle() {
                     <td align="center">v{v.numero_version}</td>
                     <td>{v.archivo_nombre_original}</td>
                     <td align="center">{fmtDate(v.fecha_version)}</td>
-                    <td>{v.observaciones || "—"}</td>
+                    <td>{v.observaciones || (v.numero_version === 1 ? "Archivo inicial" : "—")}</td>
                     <td align="right" style={{whiteSpace:"nowrap"}}>
                       <button className="btn" style={BTN.info} onClick={()=>descargarV(v.id)}>Descargar</button>{" "}
                       <button className="btn" style={BTN.danger} onClick={()=>eliminarV(v.id)} disabled={uploading || loadingList}>Eliminar</button>

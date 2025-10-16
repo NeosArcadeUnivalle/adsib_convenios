@@ -1,28 +1,29 @@
 <?php
-
+ 
 namespace App\Models;
-
+ 
 use Illuminate\Database\Eloquent\Model;
-
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+ 
 class Notificacion extends Model
 {
     protected $table = 'notificaciones';
-    public $timestamps = false;
-
+ 
     protected $fillable = [
         'convenio_id',
-        'tipo',          // 'VENCIMIENTO','RENOVACION','RIESGO','SEGUIMIENTO'...
+        'tipo',       // ALTO_RIESGO | MEDIO_RIESGO
         'mensaje',
-        'leido',         // boolean
-        'fecha_envio',   // datetime/timestamp
+        'leido',
+        'fecha_envio',
+        'acciones',   // JSON string
     ];
-
+ 
     protected $casts = [
         'leido'       => 'boolean',
         'fecha_envio' => 'datetime',
     ];
-
-    public function convenio()
+ 
+    public function convenio(): BelongsTo
     {
         return $this->belongsTo(Convenio::class, 'convenio_id');
     }

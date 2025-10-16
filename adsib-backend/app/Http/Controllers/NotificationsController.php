@@ -31,6 +31,7 @@ class NotificationsController extends Controller
         return response()->json($q->paginate($per));
     }
  
+    /** Mantengo por compatibilidad (el front ya no la usa para alertas) */
     public function markRead(Request $r, $id)
     {
         $n = Notificacion::findOrFail($id);
@@ -39,6 +40,7 @@ class NotificationsController extends Controller
         return response()->json($n);
     }
  
+    /** Mantengo por compatibilidad (el front ya no la usa para alertas) */
     public function markAllRead()
     {
         Notificacion::where('leido', false)->update(['leido' => true]);
@@ -52,13 +54,14 @@ class NotificationsController extends Controller
         return response()->json(['ok' => true]);
     }
  
-    /** Listado simple de vencidos */
+    /** Listado simple de vencidos (solo CERRADO/VENCIDO) */
     public function vencidos()
     {
         $hoy    = Carbon::today(config('app.timezone'))->toDateString();
         $driver = DB::connection()->getDriverName();
  
         $q = Convenio::select('id','titulo','estado','fecha_vencimiento')
+            ->whereIn('estado', ['CERRADO','VENCIDO'])
             ->whereNotNull('fecha_vencimiento');
  
         if (in_array($driver, ['mysql','pgsql'])) {
@@ -69,24 +72,32 @@ class NotificationsController extends Controller
  
         $rows = $q->orderBy('fecha_vencimiento', 'asc')->get();
  
+        // Auto-transición CERRADO -> VENCIDO si ya venció
+        foreach ($rows as $c) {
+            if ($c->estado === 'CERRADO') {
+                $c->estado = 'VENCIDO';
+                $c->save();
+            }
+        }
+ 
         return response()->json($rows, 200, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     }
  
     /**
      * ALERTAS (para la página de Notificaciones)
-     * Une vencimientos y riesgo (última notificación viva), por convenio.
-     * - ALTO: vencido/≤30d o análisis ALTO
-     * - MEDIO: 31–90d o análisis MEDIO (si no hay condición de ALTO)
+     * - ALTO: vencido/≤30d (solo CERRADO/VENCIDO) o análisis ALTO (solo NEGOCIACION)
+     * - MEDIO: 31–90d (solo CERRADO/VENCIDO) o análisis MEDIO (solo NEGOCIACION)
      * Devuelve { high: [...], medium: [...], badge: N }
      */
     public function alerts()
     {
         $today = Carbon::today(config('app.timezone'));
  
-        // ---- 1) VENCIMIENTOS -> item sintetizado por convenio ----
+        // ---- 1) VENCIMIENTOS (solo CERRADO / VENCIDO) ----
         $byConv = []; // convenio_id => item combinado
  
         $convs = Convenio::select('id','titulo','estado','fecha_vencimiento')
+            ->whereIn('estado', ['CERRADO','VENCIDO'])
             ->whereNotNull('fecha_vencimiento')
             ->get();
  
@@ -96,12 +107,19 @@ class NotificationsController extends Controller
  
             $days = $today->diffInDays($fv, false); // negativo si ya venció
             $nivel = null;
+ 
             if ($days <= 30) {
-                $nivel = 'ALTO';     // vencido o ≤ 30
+                $nivel = 'ALTO';
             } elseif ($days <= 90) {
-                $nivel = 'MEDIO';    // 31–90
+                $nivel = 'MEDIO';
             } else {
-                continue;            // > 90 -> fuera de alertas
+                continue; // > 90: fuera de alertas
+            }
+ 
+            // Auto-transición a VENCIDO si corresponde
+            if ($days < 0 && $c->estado === 'CERRADO') {
+                $c->estado = 'VENCIDO';
+                $c->save();
             }
  
             $mensaje = ($days < 0)
@@ -111,55 +129,61 @@ class NotificationsController extends Controller
                     : 'Vencimiento en 31–90 días');
  
             $row = [
-                'id'              => null, // sintetizada (no proviene de la tabla)
-                'convenio_id'     => $c->id,
-                'convenio_titulo' => $c->titulo,
-                'mensaje'         => $mensaje,
-                'fecha_envio'     => now(),
-                'created_at'      => now(),
-                'estado'          => $c->estado,
-                'motivos'         => ['vencimiento'],
-                'nivel'           => $nivel, // auxiliar para clasificar
-                'dias'            => $days,  // por si se requiere en el futuro
+                'id'               => null,
+                'convenio_id'      => $c->id,
+                'convenio_titulo'  => $c->titulo,
+                'mensaje'          => $mensaje,
+                'fecha_envio'      => now(),
+                'created_at'       => now(),
+                'estado'           => $c->estado,
+                'motivos'          => ['vencimiento'],
+                'nivel'            => $nivel,
+                'dias'             => $days,
             ];
  
             $byConv[$c->id] = $this->mergeAlert($byConv[$c->id] ?? null, $row);
         }
  
-        // ---- 2) RIESGO -> usar las notificaciones no leídas (último estado por convenio) ----
+        // ---- 2) RIESGO (solo NEGOCIACION, tomar la ÚLTIMA por convenio) ----
         $riesgo = Notificacion::query()
             ->whereIn('tipo', ['ALTO_RIESGO', 'MEDIO_RIESGO'])
-            ->where('leido', false)
+            // ->where('leido', false)  // ← ya no dependemos de "leídas"
             ->with(['convenio:id,titulo,estado'])
             ->orderByDesc('fecha_envio')
+            ->orderByDesc('created_at')
             ->get();
  
+        $seen = []; // convenio_id => bool, para quedarnos con la última
         foreach ($riesgo as $n) {
+            // Solo NEGOCIACION
+            if (!$n->convenio || $n->convenio->estado !== 'NEGOCIACION') continue;
+ 
+            if (isset($seen[$n->convenio_id])) continue; // ya tomamos la última de este convenio
+            $seen[$n->convenio_id] = true;
+ 
             $nivel = str_starts_with($n->tipo, 'ALTO') ? 'ALTO' : 'MEDIO';
  
             $row = [
-                'id'              => $n->id,
-                'convenio_id'     => $n->convenio_id,
-                'convenio_titulo' => $n->convenio?->titulo ?? ("Convenio #".$n->convenio_id),
-                'mensaje'         => $n->mensaje,
-                'fecha_envio'     => $n->fecha_envio ?? $n->created_at,
-                'created_at'      => $n->created_at,
-                'estado'          => $n->convenio?->estado,
-                'motivos'         => ['analisis'],
-                'nivel'           => $nivel,
+                'id'               => $n->id,
+                'convenio_id'      => $n->convenio_id,
+                'convenio_titulo'  => $n->convenio?->titulo ?? ("Convenio #".$n->convenio_id),
+                'mensaje'          => $n->mensaje,
+                'fecha_envio'      => $n->fecha_envio ?? $n->created_at,
+                'created_at'       => $n->created_at,
+                'estado'           => $n->convenio?->estado,
+                'motivos'          => ['analisis'],
+                'nivel'            => $nivel,
             ];
  
             $byConv[$n->convenio_id] = $this->mergeAlert($byConv[$n->convenio_id] ?? null, $row);
         }
  
-        // ---- 3) Clasificar en high/medium (NO borrar 'nivel' antes de clasificar) ----
+        // ---- 3) Clasificar ----
         $high = [];
         $medium = [];
  
         foreach ($byConv as $item) {
-            // prioridad: si hay algún motivo que sea ALTO, queda en ALTO
             $nivel = $item['nivel'] ?? 'MEDIO';
- 
             if ($nivel === 'ALTO') {
                 $high[] = $item;
             } else {
@@ -174,7 +198,7 @@ class NotificationsController extends Controller
         usort($high, $orderFn);
         usort($medium, $orderFn);
  
-        // limpiar campo auxiliar 'nivel' antes de responder
+        // limpiar campo auxiliar 'nivel'
         $high   = array_map(function ($x) { unset($x['nivel']); return $x; }, $high);
         $medium = array_map(function ($x) { unset($x['nivel']); return $x; }, $medium);
  
@@ -213,5 +237,21 @@ class NotificationsController extends Controller
         $out['nivel'] = ($lvlA === 'ALTO' || $lvlB === 'ALTO') ? 'ALTO' : 'MEDIO';
  
         return $out;
+    }
+ 
+    /**
+     * Refresca estados por vencimiento: CERRADO -> VENCIDO si ya pasó la fecha.
+     * Útil para un CRON o para llamarlo manualmente desde el front.
+     */
+    public function refreshExpirations()
+    {
+        $today = Carbon::today(config('app.timezone'))->toDateString();
+ 
+        $affected = Convenio::where('estado', 'CERRADO')
+            ->whereNotNull('fecha_vencimiento')
+            ->whereDate('fecha_vencimiento', '<', $today)
+            ->update(['estado' => 'VENCIDO', 'updated_at' => now()]);
+ 
+        return response()->json(['ok' => true, 'updated' => $affected]);
     }
 }

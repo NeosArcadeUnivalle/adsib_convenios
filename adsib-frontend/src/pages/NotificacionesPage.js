@@ -120,16 +120,7 @@ export default function NotificacionesPage() {
         <button className="btn" onClick={load} disabled={loading}>
           {loading ? "Actualizando…" : "Actualizar"}
         </button>
-        <button
-          className="btn"
-          style={{ marginLeft: "auto" }}
-          onClick={async () => {
-            await api.patch("/notificaciones/leer-todas").catch(() => {});
-            await load();
-          }}
-        >
-          Marcar todas como leídas
-        </button>
+        {/* Quitado: marcar como leídas (las alertas desaparecen cuando se corrige la condición) */}
       </div>
  
       {err && (
