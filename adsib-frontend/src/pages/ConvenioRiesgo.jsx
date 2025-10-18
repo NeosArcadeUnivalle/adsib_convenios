@@ -39,6 +39,55 @@ const normalize = (s="") => s.replace(/\r/g,"").replace(/[ \t]+\n/g,"\n").trim()
 const esc = (s="") => s.replace(/[&<>"']/g, (m) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
 const stripAccents = (s="") => s.normalize?.("NFD").replace(/[\u0300-\u036f]/g,"") ?? s;
 
+/** Ubicación (página/fila) basada en \f y saltos de línea reales */
+function buildLinesIndex(text=""){
+  const lines = [];
+  let page = 1, line = 1;
+  let start = 0, buf = "";
+  const pushLine = (endIdx) => {
+    lines.push({ page, line, start, end: endIdx, text: buf });
+    line += 1; buf = ""; start = endIdx + 1; // siguiente empieza después del separador
+  };
+  for (let i=0; i<text.length; i++){
+    const ch = text[i];
+    if (ch === "\f"){
+      // cerrar línea actual si venía texto sin \n
+      if (buf.length){
+        pushLine(i-1);
+      }
+      // salto de página (no es línea)
+      page += 1;
+      line = 1;
+      start = i + 1;
+      buf = "";
+      continue;
+    }
+    if (ch === "\n"){
+      pushLine(i);
+      continue;
+    }
+    buf += ch;
+  }
+  // última línea si quedó buffer
+  if (start <= text.length){
+    lines.push({ page, line, start, end: text.length, text: buf });
+  }
+  return lines;
+}
+
+/** Dado un índice absoluto, devuelve {page,line} usando el índice de líneas real */
+function pageLineFromIndexUsing(lines, absIndex){
+  for (let i=0; i<lines.length; i++){
+    const L = lines[i];
+    if (absIndex >= L.start && absIndex < L.end) return { page: L.page, line: L.line };
+  }
+  // si apunta a salto de línea/form feed justo, buscar la anterior
+  for (let i=lines.length-1; i>=0; i--){
+    if (absIndex >= lines[i].start) return { page: lines[i].page, line: lines[i].line };
+  }
+  return { page: 1, line: 1 };
+}
+
 const styleFromMatch = (m) => {
   const sev = (m?.severity || "NONE").toUpperCase();
   if ((m?.source || "").toLowerCase() === "semantic") {
@@ -76,8 +125,8 @@ const tokenRegex = (token) => {
   return new RegExp(escTok, "gi");
 };
 
-/** Snippets: usa offsets si existen; si no, cae a regex. Devuelve el rango absoluto del fragmento. */
-function makeSnippetsFromMatches(text="", matches=[], max=24) {
+/** Snippets: usa offsets si existen; si no, cae a regex. Devuelve rango absoluto + ubicación. */
+function makeSnippetsFromMatches(text="", matches=[], linesIndex=[], max=24) {
   const out = [];
   const base = stripAccents(text).toLowerCase();
   const seen = new Set();
@@ -88,11 +137,18 @@ function makeSnippetsFromMatches(text="", matches=[], max=24) {
     // --- con offsets exactos ---
     if (Number.isInteger(m.start) && Number.isInteger(m.end) && m.end > m.start) {
       const s = Math.max(0, m.start), e = Math.min(text.length, m.end);
-      const ctxS = Math.max(0, text.lastIndexOf("\n", s-1) !== -1 ? text.lastIndexOf("\n", s-1) : s-160);
-      const ctxE = Math.min(text.length, text.indexOf("\n", e) !== -1 ? text.indexOf("\n", e) : e+220);
+      // ventana en la MISMA línea si es posible (mejor lectura)
+      const leftNL  = text.lastIndexOf("\n", s-1);
+      const rightNL = text.indexOf("\n", e);
+      const ctxS = Math.max(0, leftNL !== -1 ? leftNL+1 : Math.max(0, s-160));
+      const ctxE = Math.min(text.length, rightNL !== -1 ? rightNL : Math.min(text.length, e+220));
       const raw = text.slice(ctxS, ctxE).trim();
       const key = `${s}-${e}||${raw}`;
-      if (!seen.has(key)) { seen.add(key); out.push({ token: m.token || "", raw, style: st, startAbs: ctxS, endAbs: ctxE }); }
+      if (!seen.has(key)) {
+        seen.add(key);
+        const loc = pageLineFromIndexUsing(linesIndex, s);
+        out.push({ token: m.token || "", raw, style: st, startAbs: ctxS, endAbs: ctxE, page: loc.page, line: loc.line });
+      }
       if (out.length >= max) break;
       continue;
     }
@@ -103,12 +159,20 @@ function makeSnippetsFromMatches(text="", matches=[], max=24) {
     let mt;
     while ((mt = re.exec(base)) !== null) {
       const sIdx = mt.index, eIdx = sIdx + mt[0].length;
-      const ctxS = Math.max(0, text.lastIndexOf("\n", sIdx-1) !== -1 ? text.lastIndexOf("\n", sIdx-1) : sIdx-160);
-      const ctxE = Math.min(text.length, text.indexOf("\n", eIdx) !== -1 ? text.indexOf("\n", eIdx) : eIdx+220);
+      const leftNL  = text.lastIndexOf("\n", sIdx-1);
+      const rightNL = text.indexOf("\n", eIdx);
+      const ctxS = Math.max(0, leftNL !== -1 ? leftNL+1 : Math.max(0, sIdx-160));
+      const ctxE = Math.min(text.length, rightNL !== -1 ? rightNL : Math.min(text.length, eIdx+220));
       const raw  = text.slice(ctxS, ctxE).trim();
       const key  = tok.toLowerCase() + "||" + raw;
-      if (!seen.has(key)) { seen.add(key); out.push({ token: tok, raw, style: st, startAbs: ctxS, endAbs: ctxE }); }
+      if (!seen.has(key)) {
+        seen.add(key);
+        const loc = pageLineFromIndexUsing(linesIndex, sIdx);
+        out.push({ token: tok, raw, style: st, startAbs: ctxS, endAbs: ctxE, page: loc.page, line: loc.line });
+      }
       if (out.length >= max) break;
+      // avanzar sin solaparse para no "comer" letras
+      re.lastIndex = sIdx + Math.max(1, mt[0].length);
     }
     if (out.length >= max) break;
   }
@@ -329,9 +393,49 @@ export default function ConvenioRiesgo(){
     [matchesFull]
   );
 
-  const snippets   = useMemo(() => makeSnippetsFromMatches(texto, matchesFull, 24), [texto, matchesFull]);
+  // Índice real de líneas (página/linea/start/end)
+  const linesIndex = useMemo(() => buildLinesIndex(texto), [texto]);
+
+  const snippets   = useMemo(() => makeSnippetsFromMatches(texto, matchesFull, linesIndex, 24), [texto, matchesFull, linesIndex]);
   const tokenTable = useMemo(() => countTokens(allTokens), [allTokens]);
   const density    = useMemo(() => matchDensity(texto, allTokens), [texto, allTokens]);
+
+  // ==== Render de texto analizado por líneas (como el comparador) ====
+  const analyzedRows = useMemo(() => {
+    // Para cada línea, recortar matches a su rango y resaltar
+    return linesIndex.map((L) => {
+      const localMatches = (matchesFull || []).flatMap((m) => {
+        // preferir offsets exactos
+        if (Number.isInteger(m.start) && Number.isInteger(m.end)) {
+          const s = Math.max(L.start, m.start);
+          const e = Math.min(L.end,   m.end);
+          if (e > s) {
+            return [{ ...m, start: s - L.start, end: e - L.start }];
+          }
+          return [];
+        }
+        // fallback por regex si no hay offsets
+        const tok = (m.token || "").trim();
+        if (!tok) return [];
+        const re = tokenRegex(tok);
+        const base = stripAccents(L.text).toLowerCase();
+        let mt, out = [];
+        while ((mt = re.exec(base)) !== null) {
+          out.push({ token: tok, source: m.source, severity: m.severity, start: mt.index, end: mt.index + mt[0].length });
+          re.lastIndex = mt.index + Math.max(1, mt[0].length);
+        }
+        return out;
+      });
+
+      const html = highlightByMatches(L.text, localMatches, q).__html;
+      return {
+        page: L.page,
+        line: L.line,
+        html,
+        key: `${L.page}-${L.line}-${L.start}`
+      };
+    });
+  }, [linesIndex, matchesFull, q]);
 
   const copyResumen = async () => {
     const lvl = result?.risk_level || "—";
@@ -556,11 +660,12 @@ export default function ConvenioRiesgo(){
                   boxShadow:`0 0 0 2px ${ringColor} inset`,
                   fontSize:13
                 }}>
-                  <div style={{fontSize:11.5, opacity:.9, marginBottom:6, display:"flex", gap:6, alignItems:"center"}}>
+                  <div style={{fontSize:11.5, opacity:.9, marginBottom:6, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap"}}>
                     #{i+1} · {s.token}
                     <span style={{background: stMain.bg, color: stMain.fg, borderRadius:6, padding:"2px 6px", fontSize:10.5}}>
                       {isSemantic ? "anticipación" : (SEV[stMain.severity]?.label || "N/A")}
                     </span>
+                    <span style={{opacity:.85}}>p.{s.page ?? "?"} · fila {s.line ?? "?"}</span>
                   </div>
                   <div dangerouslySetInnerHTML={{ __html: localHtml }} />
                 </div>
@@ -570,22 +675,38 @@ export default function ConvenioRiesgo(){
         )}
       </div>
 
-      {/* texto analizado */}
+      {/* texto analizado — AHORA con columnas Pág / Línea / Texto */}
       <div className="card" style={{marginTop:8, padding:10}}>
         <h3 style={{margin:0, fontSize:15}}>Texto analizado</h3>
-        <div style={{
-          maxHeight:420, overflow:"auto", marginTop:8, padding:8,
-          border:"1px solid rgba(255,255,255,.08)", borderRadius:8,
-          background:"rgba(0,0,0,.15)", whiteSpace:"pre-wrap",
-          fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize:13
-        }}>
-          <div
-            dangerouslySetInnerHTML={highlightByMatches(
-              texto,
-              matchesFull,
-              q
+        <div style={{marginTop:8, border:"1px solid rgba(255,255,255,.08)", borderRadius:8, overflow:"hidden"}}>
+          <div style={{display:"grid", gridTemplateColumns:"70px 80px 1fr", background:"#0f172a", color:"#e5e7eb", fontWeight:700, padding:"6px 8px", fontSize:12}}>
+            <div>Pág</div>
+            <div>Línea</div>
+            <div>Texto</div>
+          </div>
+          <div style={{maxHeight:420, overflow:"auto", background:"rgba(0,0,0,.15)"}}>
+            {analyzedRows.length === 0 ? (
+              <div style={{padding:10, opacity:.8, fontSize:12}}>—</div>
+            ) : (
+              analyzedRows.map(r => (
+                <div
+                  key={r.key}
+                  style={{
+                    display:"grid",
+                    gridTemplateColumns:"70px 80px 1fr",
+                    padding:"6px 8px",
+                    borderTop:"1px solid rgba(255,255,255,.06)",
+                    fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                    fontSize:13
+                  }}
+                >
+                  <div style={{opacity:.85}}>{r.page}</div>
+                  <div style={{opacity:.85}}>{r.line}</div>
+                  <div dangerouslySetInnerHTML={{ __html: r.html }} />
+                </div>
+              ))
             )}
-          />
+          </div>
         </div>
       </div>
     </div>

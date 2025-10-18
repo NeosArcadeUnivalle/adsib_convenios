@@ -24,7 +24,7 @@ export default function Login() {
     try {
       const { data } = await api.post("/auth/login", f);
       setToken(data.token);
-      // <<< Marca que acabas de iniciar sesión para abrir el popup
+      // Marca que acabas de iniciar sesión para abrir el popup en Home
       sessionStorage.setItem("just_logged_v2", "1");
       nav("/");
     } catch (er) {

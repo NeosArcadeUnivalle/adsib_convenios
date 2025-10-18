@@ -2,12 +2,12 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import api, { clearToken } from "../../api";
 import "./AppShell.css";
- 
+
 export default function AppShell() {
   const nav = useNavigate();
   const { pathname, search } = useLocation();
   const [collapsed, setCollapsed] = useState(false);
- 
+
   // Popup (inline)
   const [showPopup, setShowPopup] = useState(false);
   const [counts, setCounts] = useState({
@@ -16,60 +16,78 @@ export default function AppShell() {
     riesgo_alto: 0,
     riesgo_medio: 0,
   });
- 
+
+  // Permite forzar el popup manualmente con ?popup=1 (solo para pruebas)
   const forcePopup = useMemo(() => {
     const qs = new URLSearchParams(search);
     return qs.get("popup") === "1";
   }, [search]);
- 
+
+  // Carga y refresca el overview para los badges (no abre popup)
   useEffect(() => {
-    const LS_KEY = "seen_dashboard_popup_v2";
-    const justLogged = sessionStorage.getItem("just_logged_v2") === "1";
-  
+    let timer;
     const fetchOverview = () => {
       api
         .get("/dashboard/overview")
-        .then(({ data }) => {
+        .then(({ data }) =>
           setCounts({
             notificaciones: Number(data?.notificaciones ?? 0),
             convenios_vencidos: Number(data?.convenios_vencidos ?? 0),
             riesgo_alto: Number(data?.riesgo_alto ?? 0),
             riesgo_medio: Number(data?.riesgo_medio ?? 0),
-          });
-  
-          if (justLogged || forcePopup || !localStorage.getItem(LS_KEY)) {
-            setShowPopup(true);
-          }
-        })
-        .catch(() => {
-          if (justLogged || forcePopup || !localStorage.getItem(LS_KEY)) {
-            setShowPopup(true);
-          }
-        })
-        .finally(() => {
-          sessionStorage.removeItem("just_logged_v2");
-        });
+          })
+        )
+        .catch(() => {});
     };
-  
-    // Cargar al inicio
+
     fetchOverview();
-  
-    // 🔁 Refrescar cada 30s
-    const interval = setInterval(fetchOverview, 30000);
-  
-    return () => clearInterval(interval);
-  }, [forcePopup]);
+    // refresco cada 30s (solo actualiza contadores)
+    timer = setInterval(fetchOverview, 30000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  // Mostrar popup SOLO una vez: justo después del login y al aterrizar en "/"
+  useEffect(() => {
+    const onHome = pathname === "/";
+    const justLogged = sessionStorage.getItem("just_logged_v2") === "1";
+
+    const maybeShowOnce = async () => {
+      try {
+        const r = await api.get("/dashboard/overview");
+        setCounts({
+          notificaciones: Number(r.data?.notificaciones ?? 0),
+          convenios_vencidos: Number(r.data?.convenios_vencidos ?? 0),
+          riesgo_alto: Number(r.data?.riesgo_alto ?? 0),
+          riesgo_medio: Number(r.data?.riesgo_medio ?? 0),
+        });
+      } catch {}
+      setShowPopup(true);
+      // consumimos la marca para que NO se repita
+      sessionStorage.removeItem("just_logged_v2");
+    };
+
+    // Modo pruebas ?popup=1: muestra siempre que estés en "/"
+    if (forcePopup && onHome) {
+      maybeShowOnce();
+      return;
+    }
+
+    // Caso normal: solo cuando vienes del login y caes a "/"
+    if (justLogged && onHome) {
+      maybeShowOnce();
+    }
+  }, [pathname, forcePopup]);
 
   const closePopup = () => {
-    localStorage.setItem("seen_dashboard_popup_v2", "1");
     setShowPopup(false);
   };
- 
+
   const goToNotifications = () => {
     closePopup();
     nav("/notificaciones");
   };
- 
+
   const logout = async () => {
     try {
       await api.post("/auth/logout");
@@ -77,7 +95,7 @@ export default function AppShell() {
     clearToken();
     nav("/login");
   };
- 
+
   // Chip redondo para los contadores
   const Pill = ({ num, label, tint }) => (
     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -99,7 +117,7 @@ export default function AppShell() {
       <span style={{ fontSize: 16, fontWeight: 700 }}>{label}</span>
     </div>
   );
- 
+
   return (
     <div className={`layout ${collapsed ? "is-collapsed" : ""}`}>
       <aside className="sidebar">
@@ -112,7 +130,7 @@ export default function AppShell() {
           <img src="/adsib.jpg" alt="ADSIB" />
           {!collapsed && <span className="brand-text">ADSIB</span>}
         </button>
- 
+
         <nav className="nav">
           <Link
             className={`nav-link ${pathname === "/" ? "active" : ""}`}
@@ -122,7 +140,7 @@ export default function AppShell() {
             <span className="icon" aria-hidden />
             <span className="text">Convenios</span>
           </Link>
- 
+
           <Link
             className={`nav-link ${pathname.startsWith("/usuarios") ? "active" : ""}`}
             to="/usuarios"
@@ -131,7 +149,7 @@ export default function AppShell() {
             <span className="icon" aria-hidden />
             <span className="text">Usuarios</span>
           </Link>
- 
+
           {/* Notificaciones + badge */}
           <Link
             className={`nav-link ${pathname.startsWith("/notificaciones") ? "active" : ""}`}
@@ -164,29 +182,27 @@ export default function AppShell() {
             )}
           </Link>
         </nav>
- 
+
         <button className="nav-link logout" type="button" onClick={logout}>
           <span className="icon">⎋</span>
           <span className="text">Salir</span>
         </button>
       </aside>
- 
+
       <main className="content">
         <Outlet />
       </main>
- 
-      {/* ==================== POPUP MEJORADO ==================== */}
+
+      {/* ==================== POPUP ==================== */}
       {showPopup && (
         <>
-          {/* estilos del modal (animación) */}
           <style>{`
             @keyframes adsibPopIn {
               from { opacity: 0; transform: translateY(8px) scale(.98); }
               to   { opacity: 1; transform: translateY(0) scale(1); }
             }
           `}</style>
- 
-          {/* backdrop con blur, menos invasivo */}
+
           <div
             role="dialog"
             aria-modal="true"
@@ -204,7 +220,6 @@ export default function AppShell() {
               padding: 16,
             }}
           >
-            {/* card; detenemos el click para no cerrar */}
             <div
               className="card"
               onClick={(e) => e.stopPropagation()}
@@ -221,7 +236,6 @@ export default function AppShell() {
                 animation: "adsibPopIn .18s ease-out both",
               }}
             >
-              {/* header con gradiente sutil */}
               <div
                 style={{
                   padding: "16px 18px",
@@ -234,8 +248,7 @@ export default function AppShell() {
                   Resumen rápido
                 </h2>
               </div>
- 
-              {/* contenido */}
+
               <div style={{ padding: 18, display: "grid", gap: 14 }}>
                 <Pill
                   num={Number(counts.riesgo_alto || 0)}
@@ -248,8 +261,7 @@ export default function AppShell() {
                   tint="#fcdc5bff"
                 />
               </div>
- 
-              {/* acciones */}
+
               <div
                 style={{
                   padding: 16,

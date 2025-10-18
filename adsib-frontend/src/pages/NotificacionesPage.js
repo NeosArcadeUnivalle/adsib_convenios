@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../api";
- 
+
 /* --------- UI helpers --------- */
 const chip = (text, type = "neutral") => {
   const styles =
@@ -10,7 +10,7 @@ const chip = (text, type = "neutral") => {
       medium: { bg: "#92400e", fg: "#fff" }, // ámbar
       neutral: { bg: "#111827", fg: "#e5e7eb" },
     }[type] || { bg: "#111827", fg: "#e5e7eb" };
- 
+
   return (
     <span
       style={{
@@ -26,7 +26,7 @@ const chip = (text, type = "neutral") => {
     </span>
   );
 };
- 
+
 /** Texto explicativo según los motivos y estado */
 const detalleAlto = (n) => {
   const m = n.motivos || [];
@@ -40,42 +40,55 @@ const detalleAlto = (n) => {
   if (anal) return "Detectado por análisis de riesgo";
   return n.estado === "VENCIDO" ? "Convenio vencido." : "Vencimiento en ≤ 30 días";
 };
- 
+
 const detalleMedio = (n) => {
   const m = n.motivos || [];
   if (m.includes("analisis")) return "Detectado por análisis de riesgo";
   return "Vencimiento en 31–90 días";
 };
- 
+
 export default function NotificacionesPage() {
   const [high, setHigh] = useState([]);
   const [medium, setMedium] = useState([]);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
- 
+
+  const pollRef = useRef(null);
+
   const load = useCallback(async () => {
-    setLoading(true);
     setErr("");
     try {
-      let resp;
-      try {
-        resp = await api.get("/notificaciones/alertas");
-      } catch {
-        resp = await api.get("/notificaciones"); // fallback
-      }
+      const resp = await api.get("/notificaciones/alertas");
       const data = resp?.data || {};
-      setHigh(data.high || data.altas || []);
-      setMedium(data.medium || data.medias || []);
+      setHigh(Array.isArray(data.high) ? data.high : (data.altas || []));
+      setMedium(Array.isArray(data.medium) ? data.medium : (data.medias || []));
     } catch {
       setErr("No se pudieron obtener las notificaciones.");
-    } finally {
-      setLoading(false);
     }
   }, []);
- 
-  useEffect(() => { load(); }, [load]);
- 
+
+  // carga inicial + polling "tiempo real"
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      await load();
+      setLoading(false);
+    })();
+
+    // polling cada 10s
+    pollRef.current = setInterval(() => { load(); }, 10000);
+
+    // refrescar al volver a la pestaña
+    const onVisible = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [load]);
+
   const filterList = useCallback((list, query) => {
     const s = (query || "").trim().toLowerCase();
     if (!s) return list;
@@ -85,10 +98,10 @@ export default function NotificacionesPage() {
         (n.convenio_titulo || "").toLowerCase().includes(s)
     );
   }, []);
- 
+
   const hi = useMemo(() => filterList(high, q), [high, q, filterList]);
   const mid = useMemo(() => filterList(medium, q), [medium, q, filterList]);
- 
+
   const BtnVer = ({ id }) => (
     <Link
       className="btn"
@@ -105,11 +118,11 @@ export default function NotificacionesPage() {
       Ver
     </Link>
   );
- 
+
   return (
     <div className="card" style={{ padding: 20 }}>
       <h2 style={{ marginTop: 0 }}>Notificaciones</h2>
- 
+
       <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
         <input
           placeholder="Buscar notificación…"
@@ -120,22 +133,22 @@ export default function NotificacionesPage() {
         <button className="btn" onClick={load} disabled={loading}>
           {loading ? "Actualizando…" : "Actualizar"}
         </button>
-        {/* Quitado: marcar como leídas (las alertas desaparecen cuando se corrige la condición) */}
+        {/* Se quita "Marcar todas como leídas" (ya no aplica) */}
       </div>
- 
+
       {err && (
         <div className="card" style={{ background: "#7f1d1d", borderColor: "#b91c1c", color: "#fee2e2" }}>
           {err}
         </div>
       )}
- 
+
       {/* ALTO */}
       <div className="card" style={{ borderColor: "#7f1d1d", marginTop: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <h3 style={{ margin: 0 }}>Prioritarias (ALTO)</h3>
           {chip(hi.length, "high")}
         </div>
- 
+
         {hi.length === 0 ? (
           <div style={{ opacity: 0.8, marginTop: 6 }}>Sin notificaciones prioritarias.</div>
         ) : (
@@ -168,14 +181,14 @@ export default function NotificacionesPage() {
           </div>
         )}
       </div>
- 
+
       {/* MEDIO */}
       <div className="card" style={{ marginTop: 12, borderColor: "#78350f" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <h3 style={{ margin: 0 }}>Advertencias (MEDIO)</h3>
           {chip(mid.length, "medium")}
         </div>
- 
+
         {mid.length === 0 ? (
           <div style={{ opacity: 0.8, marginTop: 6 }}>Sin advertencias.</div>
         ) : (
