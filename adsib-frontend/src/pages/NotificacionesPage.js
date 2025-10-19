@@ -119,6 +119,14 @@ export default function NotificacionesPage() {
     </Link>
   );
 
+  const formatoSoloFecha = (s) =>
+    new Intl.DateTimeFormat("es-BO", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      timeZone: "America/La_Paz",
+    }).format(new Date(s));
+
   return (
     <div className="card" style={{ padding: 20 }}>
       <h2 style={{ marginTop: 0 }}>Notificaciones</h2>
@@ -171,7 +179,7 @@ export default function NotificacionesPage() {
                 <div>{chip("ALTO", "high")}</div>
                 <div style={{ opacity: 0.9 }}>{detalleAlto(n)}</div>
                 <div style={{ opacity: 0.8 }}>
-                  {new Date(n.fecha_envio || n.created_at).toLocaleString()}
+                  {formatoSoloFecha(n.fecha_envio || n.created_at)}
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-start" }}>
                   <BtnVer id={n.convenio_id} />
@@ -211,7 +219,7 @@ export default function NotificacionesPage() {
                 <div>{chip("MEDIO", "medium")}</div>
                 <div style={{ opacity: 0.9 }}>{detalleMedio(n)}</div>
                 <div style={{ opacity: 0.8 }}>
-                  {new Date(n.fecha_envio || n.created_at).toLocaleString()}
+                  {formatoSoloFecha(n.fecha_envio || n.created_at)}
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-start" }}>
                   <BtnVer id={n.convenio_id} />

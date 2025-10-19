@@ -1,4 +1,3 @@
-// resources/js/pages/ConvenioRiesgo.jsx
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import api from "../api";
@@ -280,14 +279,25 @@ const modelFriendly = (m = "") => {
   return m || "motor desconocido";
 };
 
-/** Formateo de fecha en *tu* zona: si no hay offset/Z, se toma como local */
+/** Formateo de fecha SOLO FECHA y en zona La Paz */
 const fmtFecha = (s) => {
   if (!s) return "—";
-  const isoish = s.includes("T") ? s : s.replace(" ", "T");
   try {
-    const d = new Date(isoish); // sin Z => local, con Z => UTC
-    return isNaN(d.getTime()) ? s : d.toLocaleString();
-  } catch { return s; }
+    // ⚠️ Corrección del warning: se elimina el escape innecesario del guion en la clase de caracteres
+    const hasTZ = /([zZ])|([+-]\d{2}:?\d{2})$/.test(s);
+    let iso = s.includes("T") ? s : s.replace(" ", "T");
+    if (!hasTZ) iso += "Z"; // si no trae zona, tratamos como UTC
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return s;
+    return new Intl.DateTimeFormat("es-BO", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      timeZone: "America/La_Paz",
+    }).format(d);
+  } catch {
+    return s;
+  }
 };
 
 /* =================== Página =================== */
