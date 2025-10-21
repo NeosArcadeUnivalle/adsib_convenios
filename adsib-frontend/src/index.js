@@ -14,6 +14,7 @@ import ConvenioComparar from "./pages/ConvenioComparar";
 import NotificacionesPage from "./pages/NotificacionesPage";
 import Login from "./pages/Login";
 import ConvenioRiesgo from "./pages/ConvenioRiesgo";
+import AssistantPage from "./pages/AssistantPage";
 
 // Páginas de Usuarios
 import UsersList from "./pages/UsersList";
@@ -36,7 +37,8 @@ root.render(
           <Route path="/convenios/:id/editar" element={<ConvenioEdit />} />
           <Route path="/convenios/:id/comparar" element={<ConvenioComparar />} />
           <Route path="/convenios/:id/riesgo" element={<ConvenioRiesgo />} />
-
+          <Route path="/asistente" element={<AssistantPage />} />
+          
           {/* Notificaciones */}
           <Route path="/notificaciones" element={<NotificacionesPage />} />
 

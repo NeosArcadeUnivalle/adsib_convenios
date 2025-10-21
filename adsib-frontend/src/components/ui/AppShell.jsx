@@ -133,6 +133,14 @@ export default function AppShell() {
 
         <nav className="nav">
           <Link
+            className={`nav-link ${pathname.startsWith("/asistente") ? "active" : ""}`}
+            to="/asistente"
+            title="Asistente Virtual"
+          >
+            <span className="icon" aria-hidden />
+            <span className="text">Asistente Virtual</span>
+          </Link>
+          <Link
             className={`nav-link ${pathname === "/" ? "active" : ""}`}
             to="/"
             title="Convenios"
