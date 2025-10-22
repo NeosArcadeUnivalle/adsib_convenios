@@ -1,6 +1,8 @@
 <?php
 
-namespace App\Services\Assistant;
+declare(strict_types=1);
+
+namespace App\Services;
 
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
@@ -19,16 +21,13 @@ class AssistantEngine
         $message = trim($message);
         $ctxConvenioId = $context['convenio_id'] ?? null;
 
-        // 1) Detectar intención simple por palabras clave
         $intent = $this->detectIntent($message);
-
-        // 2) Buscar datos en BD según intención
-        $data = $this->queryData($intent, $message, $ctxConvenioId);
-
-        // 3) Armar prompt con datos + snippets y pedir a la IA local
+        $data   = $this->queryData($intent, $message, $ctxConvenioId);
         $prompt = $this->buildPrompt($message, $intent, $data);
 
-        $reply = $this->ai->generate($prompt);
+        $reply = $this->ai->generate([
+            'prompt' => $prompt,
+        ]);
 
         return [
             'intent' => $intent,
@@ -59,13 +58,10 @@ class AssistantEngine
         if (Str::contains($s, ['versión', 'versiones', 'comparar', 'historial', 'logs'])) {
             return 'meta_versiones';
         }
-
-        // Si el usuario pregunta algo del contenido del documento:
         if (Str::contains($s, ['qué dice', 'que dice', 'contenido', 'artículo', 'cláusula', 'clausula', 'donde menciona', 'en qué página', 'texto'])) {
             return 'contenido';
         }
 
-        // fallback: probar primero contenido (RAG), si no hay hits, general
         return 'contenido';
     }
 
@@ -94,7 +90,6 @@ class AssistantEngine
 
     protected function qVencimientos(string $q): array
     {
-        // rango aproximado “este mes” / “30 días”
         $desde = now()->startOfMonth()->toDateString();
         $hasta = now()->endOfMonth()->toDateString();
         if (Str::contains(Str::lower($q), ['30', 'treinta'])) {
@@ -111,7 +106,7 @@ class AssistantEngine
             ->get();
 
         return [
-            'tipo' => 'vencimientos',
+            'tipo'  => 'vencimientos',
             'desde' => $desde,
             'hasta' => $hasta,
             'items' => $rows,
@@ -120,7 +115,6 @@ class AssistantEngine
 
     protected function qRiesgos(string $q): array
     {
-        // riesgo ALTO|MEDIO|BAJO (tomar el último análisis por convenio)
         $nivel = 'ALTO';
         if (Str::contains(Str::upper($q), 'MEDIO')) $nivel = 'MEDIO';
         if (Str::contains(Str::upper($q), 'BAJO'))  $nivel = 'BAJO';
@@ -134,7 +128,7 @@ class AssistantEngine
             ->get();
 
         return [
-            'tipo' => 'riesgo',
+            'tipo'  => 'riesgo',
             'nivel' => $nivel,
             'items' => $rows,
         ];
@@ -142,7 +136,6 @@ class AssistantEngine
 
     protected function qBuscarTitulo(string $q): array
     {
-        // extrae palabra(s) entre comillas o después de “buscar”
         if (preg_match('/"(.*?)"/', $q, $m)) {
             $needle = $m[1];
         } else {
@@ -158,7 +151,7 @@ class AssistantEngine
             ->get();
 
         return [
-            'tipo' => 'buscar_titulo',
+            'tipo'  => 'buscar_titulo',
             'query' => $needle,
             'items' => $rows,
         ];
@@ -186,16 +179,15 @@ class AssistantEngine
             ->get();
 
         return [
-            'tipo' => 'detalle',
-            'convenio' => $convenio,
-            'riesgo' => $ultRiesgo,
+            'tipo'      => 'detalle',
+            'convenio'  => $convenio,
+            'riesgo'    => $ultRiesgo,
             'versiones' => $versiones,
         ];
     }
 
     protected function qDetalleMixto(string $q, $ctxConvenioId): array
     {
-        // si hay id en contexto úsalo; si no, intenta por título rápido:
         $row = null;
         if ($ctxConvenioId) {
             $row = DB::table('convenios')->where('id',$ctxConvenioId)->first();
@@ -212,7 +204,6 @@ class AssistantEngine
 
     protected function qMetaVersiones(string $q): array
     {
-        // si el usuario escribe "convenio #12 versiones|comparar|historial|logs"
         preg_match('/convenio\s*#?\s*(\d+)/i', $q, $m);
         $id = $m[1] ?? null;
         if (!$id) return ['tipo'=>'meta_versiones','error'=>'No se pudo extraer el id.'];
@@ -231,17 +222,15 @@ class AssistantEngine
             ->get();
 
         return [
-            'tipo' => 'meta_versiones',
-            'convenio_id' => $id,
-            'versiones' => $versiones,
-            'logs' => $logs,
+            'tipo'         => 'meta_versiones',
+            'convenio_id'  => $id,
+            'versiones'    => $versiones,
+            'logs'         => $logs,
         ];
     }
 
     protected function qContenido(string $q, $ctxConvenioId): array
     {
-        // RAG sobre riesgo_dataset (no requiere extensiones)
-        // si hay convenio en contexto, se filtra; si no, busca global
         $builder = DB::table('riesgo_dataset')
             ->select('convenio_id','version_id','page','line','text')
             ->whereNotNull('text');
@@ -250,7 +239,6 @@ class AssistantEngine
             $builder->where('convenio_id', $ctxConvenioId);
         }
 
-        // Usar full-text “español” básico
         $qts = trim($q);
         $rows = $builder
             ->whereRaw("to_tsvector('spanish', text) @@ plainto_tsquery('spanish', ?)", [$qts])
@@ -282,7 +270,7 @@ class AssistantEngine
             case 'riesgo':
                 $ctx .= "Convenios con riesgo {$data['nivel']} (recientes):\n";
                 foreach ($data['items'] as $r) {
-                    $conf = number_format(($r->score ?? 0) * 100, 0)."%";
+                    $conf = number_format(($r->score ?? 0) * 100, 0) . "%";
                     $ctx .= "- #{$r->convenio_id} {$r->titulo} • confianza {$conf} • analizado {$r->analizado_en}\n";
                 }
                 break;
@@ -301,9 +289,11 @@ class AssistantEngine
                 } else {
                     $c = $data['convenio'];
                     $ctx .= "Convenio #{$c->id} «{$c->titulo}»\n";
-                    $ctx .= "Vence: ".($c->fecha_vencimiento ?? 'N/D')."\n";
+                    $ctx .= "Vence: " . ($c->fecha_vencimiento ?? 'N/D') . "\n";
                     if ($data['riesgo']) {
-                        $ctx .= "Último riesgo: {$data['riesgo']->risk_level} (".number_format(($data['riesgo']->score ?? 0)*100,0)."%) el {$data['riesgo']->analizado_en}\n";
+                        $ctx .= "Último riesgo: {$data['riesgo']->risk_level} (" .
+                            number_format(($data['riesgo']->score ?? 0) * 100, 0) .
+                            "%) el {$data['riesgo']->analizado_en}\n";
                     }
                     $ctx .= "Versiones:\n";
                     foreach ($data['versiones'] as $v) {
@@ -331,8 +321,8 @@ class AssistantEngine
             default:
                 $ctx .= "Fragmentos relevantes del corpus (convenio/version/página/línea):\n";
                 foreach ($data['snippets'] ?? [] as $s) {
-                    $line = $s->line ?? '?';
-                    $page = $s->page ?? '?';
+                    $line  = $s->line ?? '?';
+                    $page  = $s->page ?? '?';
                     $texto = trim(preg_replace('/\s+/', ' ', $s->text ?? ''));
                     $ctx .= "- C{$s->convenio_id} V{$s->version_id} P{$page} L{$line}: {$texto}\n";
                 }

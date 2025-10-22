@@ -44,7 +44,7 @@ const Bubble = ({ role, text }) => {
           padding: "10px 14px",
           lineHeight: 1.5,
           color: isUser ? "#e6fffb" : "#f4f4f5",
-          background: isUser ? "#0f766e" : "#0a0a0a", // negro para asistente
+          background: isUser ? "#0f766e" : "#0a0a0a",
           boxShadow:
             "0 4px 16px rgba(0,0,0,.25), inset 0 0 0 1px rgba(255,255,255,.07)",
         }}
@@ -95,6 +95,24 @@ export default function AssistantPage() {
     ta.style.height = Math.min(180, ta.scrollHeight) + "px";
   }, [input]);
 
+  const parseLaravelError = (err) => {
+    // intenta extraer información útil del backend
+    const data = err?.response?.data;
+    if (!data) return null;
+
+    // Si tu backend retorna {reply, meta}, muéstralo
+    if (typeof data.reply === "string" && data.reply.trim()) {
+      return data.reply;
+    }
+
+    // Modo debug de Laravel: { message, exception, file, line, trace ... }
+    const parts = [];
+    if (data.message) parts.push(`Mensaje: ${data.message}`);
+    if (data.exception) parts.push(`Excepción: ${data.exception}`);
+    if (data.file && data.line) parts.push(`Ubicación: ${data.file}:${data.line}`);
+    return parts.length ? `⚠️ Error del servidor (500)\n\n${parts.join("\n")}` : null;
+  };
+
   const send = async (text) => {
     const msg = (text ?? input).trim();
     if (!msg || busy) return;
@@ -105,18 +123,24 @@ export default function AssistantPage() {
 
     try {
       const { data } = await api.post(
-        "/assistant/chat",
+        "/assistant/chat", // baseURL del axios "api" debería ser "/api"
         { message: msg, context: {} },
-        { timeout: 120000 }
+        {
+          timeout: 120000,
+          headers: {
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+          },
+        }
       );
+
       const reply = data?.reply || "No recibí respuesta.";
       setMessages((m) => [...m, { role: "assistant", text: reply }]);
     } catch (e) {
       console.error(e);
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", text: "Ocurrió un problema al consultar. Inténtalo nuevamente." },
-      ]);
+      const friendly = parseLaravelError(e) ||
+        "Ocurrió un problema al consultar (HTTP 500). Revisa el log en el servidor: storage/logs/laravel.log";
+      setMessages((m) => [...m, { role: "assistant", text: friendly }]);
     } finally {
       setBusy(false);
     }
@@ -236,7 +260,6 @@ const styles = {
     margin: 0,
     fontSize: 26,
     fontWeight: 900,
-    letterSpacing: ".2px",
   },
   main: {
     maxWidth: 1200,
@@ -262,7 +285,7 @@ const styles = {
     height: "60vh",
     borderRadius: 16,
     border: "1px solid rgba(255,255,255,.06)",
-    background: "rgba(0,0,0,.35)", // más oscuro para integrarse con burbuja negra
+    background: "rgba(0,0,0,.35)",
     overflowY: "auto",
     padding: 14,
   },

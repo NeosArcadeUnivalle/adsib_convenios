@@ -13,11 +13,6 @@ use App\Http\Controllers\AnalisisController;
 use App\Http\Controllers\RiesgosController;
 use App\Http\Controllers\AssistantController;
 
-/* Asistente Virtual */
-Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/assistant/chat', [AssistantController::class, 'chat']);
-});
-
 /* -------------------- Públicas -------------------- */
 Route::get('/ping', fn () => response()->json(['ok' => true, 'service' => 'LARAVEL10']));
 Route::post('/auth/login', [AuthController::class, 'login']);
@@ -73,6 +68,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get ('/analisis',         [AnalisisController::class, 'index']);  // historial por versión
     Route::get ('/analisis/dataset', [RiesgosController::class, 'dataset']); // dataset por versión
 
+    /* Asistente Virtual */
+    Route::post('/assistant/chat', [AssistantController::class, 'chat']);
 });
  
 /* Utilitario */
