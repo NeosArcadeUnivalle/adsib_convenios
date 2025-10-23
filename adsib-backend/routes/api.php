@@ -69,7 +69,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get ('/analisis/dataset', [RiesgosController::class, 'dataset']); // dataset por versión
 
     /* Asistente Virtual */
-    Route::post('/assistant/chat', [AssistantController::class, 'chat']);
+    Route::post('assistant/chat', [AssistantController::class, 'chat']);
+    Route::post('/assistant/reindex', [AssistantController::class, 'reindex']); // opcional para reconstruir índice
 });
  
 /* Utilitario */

@@ -50,6 +50,49 @@ class ConvenioController extends Controller
         }
     }
 
+    /* ===== extracción de texto para apoyar al asistente ===== */
+
+    private function getTextFromDocx(string $absPath): ?string
+    {
+        if (!class_exists(\ZipArchive::class)) return null;
+        try {
+            $zip = new \ZipArchive();
+            if ($zip->open($absPath) !== true) return null;
+            $xml = $zip->getFromName('word/document.xml');
+            $zip->close();
+            if ($xml === false) return null;
+
+            // saltos de párrafo/filas visibles
+            $xml = preg_replace('/<\/w:p>/', "\n", $xml);
+            $xml = preg_replace('/<\/w:tr>/', "\n", $xml);
+
+            return $this->toUtf8(strip_tags($xml));
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function getTextFromPdf(string $absPath): ?string
+    {
+        if (!class_exists(\Smalot\PdfParser\Parser::class)) return null;
+        try {
+            $parser = new \Smalot\PdfParser\Parser();
+            $pdf = $parser->parseFile($absPath);
+            return $this->toUtf8($pdf->getText());
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function tryExtractText(string $storagePath): ?string
+    {
+        $abs = Storage::path($storagePath);
+        $ext = strtolower(pathinfo($abs, PATHINFO_EXTENSION));
+        if ($ext === 'docx') return $this->getTextFromDocx($abs);
+        if ($ext === 'pdf')  return $this->getTextFromPdf($abs);
+        return null;
+    }
+
     private function crearVersionInicial(Convenio $c, string $path, string $name): void
     {
         // Ver si existe V1; si no, crearla con observaciones "Archivo inicial"
@@ -57,6 +100,9 @@ class ConvenioController extends Controller
             ->where('numero_version', 1)->exists();
 
         if (!$yaTieneV1) {
+            // 👇 extraemos y guardamos el texto
+            $texto = $this->tryExtractText($path);
+
             VersionConvenio::create([
                 'convenio_id'              => $c->id,
                 'numero_version'           => 1,
@@ -64,6 +110,7 @@ class ConvenioController extends Controller
                 'archivo_path'             => $path,
                 'fecha_version'            => now(),
                 'observaciones'            => 'Archivo inicial',
+                'texto'                    => $texto, // <-- aquí
                 'created_at'               => now(),
             ]);
         }
@@ -133,6 +180,7 @@ class ConvenioController extends Controller
             $c->archivo_path = $path;
             $c->save();
 
+            // crea V1 y guarda el texto extraído
             $this->crearVersionInicial($c, $path, $name);
         }
 
@@ -182,8 +230,10 @@ class ConvenioController extends Controller
             }
             $c->save();
 
-            // crear nueva versión (n+1)
+            // crear nueva versión (n+1) guardando también el texto
             $next = ((int) VersionConvenio::where('convenio_id', $c->id)->max('numero_version')) + 1;
+            $texto = $this->tryExtractText($path);
+
             VersionConvenio::create([
                 'convenio_id'              => $c->id,
                 'numero_version'           => $next,
@@ -191,6 +241,7 @@ class ConvenioController extends Controller
                 'archivo_path'             => $path,
                 'fecha_version'            => now(),
                 'observaciones'            => 'Actualización',
+                'texto'                    => $texto, // <-- aquí
                 'created_at'               => now(),
             ]);
         }
@@ -240,8 +291,19 @@ class ConvenioController extends Controller
 
         // Si no hay V1, crearla como "Archivo inicial". Si ya hay, crear la siguiente.
         $max = (int) VersionConvenio::where('convenio_id', $c->id)->max('numero_version');
+        $texto = $this->tryExtractText($path);
+
         if ($max === 0) {
-            $this->crearVersionInicial($c, $path, $name);
+            VersionConvenio::create([
+                'convenio_id'              => $c->id,
+                'numero_version'           => 1,
+                'archivo_nombre_original'  => $name,
+                'archivo_path'             => $path,
+                'fecha_version'            => now(),
+                'observaciones'            => 'Archivo inicial',
+                'texto'                    => $texto, // <-- aquí
+                'created_at'               => now(),
+            ]);
         } else {
             VersionConvenio::create([
                 'convenio_id'              => $c->id,
@@ -250,6 +312,7 @@ class ConvenioController extends Controller
                 'archivo_path'             => $path,
                 'fecha_version'            => now(),
                 'observaciones'            => 'Actualización',
+                'texto'                    => $texto, // <-- aquí
                 'created_at'               => now(),
             ]);
         }

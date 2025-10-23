@@ -1,0 +1,1 @@
+# vacío intencionalmente; solo para tratar a "app" como paquete Python.
