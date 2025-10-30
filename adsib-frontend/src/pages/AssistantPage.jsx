@@ -76,6 +76,9 @@ export default function AssistantPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // NUEVO: guía plegable
+  const [showGuide, setShowGuide] = useState(true);
+
   const scroller = useRef(null);
   const textareaRef = useRef(null);
 
@@ -85,7 +88,7 @@ export default function AssistantPage() {
   useEffect(() => {
     const el = scroller.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [messages, busy]);
+  }, [messages, busy, showGuide]);
 
   // autosize textarea
   useEffect(() => {
@@ -164,6 +167,20 @@ export default function AssistantPage() {
             <div style={styles.brandCube} />
             <h1 style={styles.title}>Asistente Virtual</h1>
           </div>
+
+          {/* NUEVO: botón guía en header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={() => setShowGuide((v) => !v)}
+              style={{
+                ...styles.helpBtn,
+                ...(showGuide ? styles.helpBtnActive : {}),
+              }}
+              title={showGuide ? "Ocultar guía" : "Mostrar guía"}
+            >
+              {showGuide ? "Ocultar guía" : "Guía"}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -171,6 +188,65 @@ export default function AssistantPage() {
       <main style={styles.main}>
         <div style={styles.card}>
           <div style={styles.cardTopBar} />
+
+          {/* NUEVO: Panel de Guía */}
+          {showGuide && (
+            <div style={styles.guide}>
+              <div style={styles.guideCols}>
+                <section style={styles.guideCol}>
+                  <h3 style={styles.guideTitle}>Cómo usar el asistente</h3>
+                  <ul style={styles.guideList}>
+                    <li>
+                      <strong style={styles.strong}>Pregunta directo</strong> con lenguaje natural.
+                      No necesitas el nombre exacto ni el formato “oficial”. El asistente entiende abreviaturas,
+                      errores comunes y alias (p. ej., <em>BoA</em>, <em>AGETIC</em>, <em>Ministerio salud dep</em>).
+                    </li>
+                    <li>
+                      Para referirte a una <strong style={styles.strong}>versión</strong> puedes decir
+                      “v1”, “versión 2”, “archivo inicial/final”.
+                    </li>
+                    <li>
+                      Si quieres <strong style={styles.strong}>filtrar por tiempo</strong> usa frases como
+                      “este año”, “próximos 30 días”, “ordenados por vencimiento”.
+                    </li>
+                    <li>
+                      El asistente solo responde sobre <strong style={styles.strong}>convenios</strong>
+                      (fechas, versiones, riesgo, cláusulas, contacto, notificaciones, etc.). Preguntas fuera de este
+                      tema mostrarán un mensaje estándar.
+                    </li>
+                  </ul>
+                </section>
+
+                <section style={styles.guideCol}>
+                  <h3 style={styles.guideTitle}>Ejemplos útiles</h3>
+                  <ul style={styles.guideList}>
+                    <li>¿Cuál es la <strong style={styles.strong}>fecha de vencimiento</strong> del convenio con <em>BoA</em>?</li>
+                    <li>¿Qué convenios <strong style={styles.strong}>vencen este año</strong>?</li>
+                    <li>Muéstrame los convenios <strong style={styles.strong}>firmados este año</strong>.</li>
+                    <li>Convenios <strong style={styles.strong}>ordenados por vencimiento</strong>.</li>
+                    <li>¿Qué convenios están en estado <strong style={styles.strong}>NEGOCIACION</strong>?</li>
+                    <li>¿Qué convenios vencen en los <strong style={styles.strong}>próximos 15 días</strong>?</li>
+                    <li>¿Cuántas <strong style={styles.strong}>versiones</strong> tiene mi convenio con <em>Ministerio de Salud</em>?</li>
+                    <li>¿Cuáles son las <strong style={styles.strong}>observaciones</strong> de la <strong style={styles.strong}>v1</strong> de <em>AGETIC</em>?</li>
+                    <li>Dime las <strong style={styles.strong}>cláusulas detectadas</strong> en el último <strong style={styles.strong}>análisis de riesgo</strong> de <em>BoA</em>.</li>
+                    <li>Quiero los <strong style={styles.strong}>detalles</strong> del convenio <em>UMSS</em>.</li>
+                    <li>¿Cuál es la <strong style={styles.strong}>descripción</strong> de mi convenio <em>UPB</em>?</li>
+                    <li>¿Quién es el <strong style={styles.strong}>contacto/responsable</strong> de <em>AGETIC</em>?</li>
+                    <li>¿Cuáles son mis <strong style={styles.strong}>notificaciones</strong> más recientes?</li>
+                  </ul>
+                </section>
+              </div>
+              <div style={styles.tipRow}>
+                <span style={styles.tipBadge}>Sugerencia</span>
+                <span>
+                  Si el nombre es largo, puedes escribirlo entre comillas:{" "}
+                  <code style={styles.code}>"Ministerio de Salud y Deportes"</code>.  
+                  También puedes usar abreviaturas: <code style={styles.code}>MSD</code>,{" "}
+                  <code style={styles.code}>AGETIC</code>, <code style={styles.code}>BoA</code>.
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Chat area */}
           <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "18px 22px" }}>
@@ -281,6 +357,70 @@ const styles = {
     width: "100%",
     background: "linear-gradient(90deg, #f97316, #f59e0b, #10b981)",
   },
+
+  /* ===== NUEVO: Guía ===== */
+  guide: {
+    padding: "16px 22px 6px",
+    borderBottom: "1px solid rgba(255,255,255,.06)",
+    background: "rgba(0,0,0,.35)",
+  },
+  guideCols: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 18,
+  },
+  guideCol: {
+    background: "rgba(20,20,20,.55)",
+    border: "1px solid rgba(255,255,255,.06)",
+    borderRadius: 14,
+    padding: "14px 16px",
+  },
+  guideTitle: {
+    margin: "0 0 8px 0",
+    fontSize: 16,
+    fontWeight: 800,
+    color: "#f3f4f6",
+  },
+  guideList: {
+    margin: 0,
+    paddingLeft: 18,
+    lineHeight: 1.6,
+    color: "#d1d5db",
+  },
+  tipRow: {
+    display: "flex",
+    gap: 10,
+    alignItems: "center",
+    padding: "10px 12px",
+    marginTop: 12,
+    background: "rgba(24,24,24,.55)",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,.06)",
+    color: "#d1d5db",
+  },
+  tipBadge: {
+    display: "inline-block",
+    padding: "4px 8px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#0b1220",
+    background: "linear-gradient(135deg,#f97316,#f59e0b)",
+  },
+  code: {
+    background: "rgba(0,0,0,.45)",
+    border: "1px solid rgba(255,255,255,.06)",
+    padding: "2px 6px",
+    borderRadius: 8,
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    fontSize: 12,
+    color: "#e5e7eb",
+  },
+  strong: {
+    fontWeight: 800,
+    color: "#f9fafb",
+  },
+
   scrollArea: {
     height: "60vh",
     borderRadius: 16,
@@ -331,6 +471,22 @@ const styles = {
     cursor: "not-allowed",
     opacity: 0.55,
     boxShadow: "none",
+  },
+  helpBtn: {
+    border: "1px solid rgba(255,255,255,.12)",
+    background: "rgba(0,0,0,.35)",
+    color: "#e5e7eb",
+    padding: "8px 12px",
+    borderRadius: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+    boxShadow: "0 6px 18px rgba(0,0,0,.25)",
+    transition: "opacity .15s, transform .06s",
+  },
+  helpBtnActive: {
+    background: "linear-gradient(135deg,#f97316,#f59e0b)",
+    color: "#0b1220",
+    border: "1px solid rgba(0,0,0,.25)",
   },
   srOnly: {
     position: "absolute",
