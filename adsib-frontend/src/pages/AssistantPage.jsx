@@ -435,20 +435,23 @@ const styles = {
     background: "#242424ff",
     border: "1px solid rgba(0, 0, 0, 0.07)",
   },
+  // Reemplaza en "styles"
   composerRow: {
     display: "flex",
-    alignItems: "flex-end",
+    alignItems: "center",      // <- antes: "flex-end"
     gap: 10,
     maxWidth: 880,
     margin: "0 auto",
     width: "100%",
   },
+
   textarea: {
     width: "100%",
     resize: "none",
     borderRadius: 16,
     padding: "10px 12px",
-    lineHeight: 1.6,
+    minHeight: 44,             // <- asegura altura mínima
+    lineHeight: 1.4,
     color: "#e5e7eb",
     background: "rgba(0, 0, 0, 0.6)",
     border: "1px solid #0a0a0aff",
@@ -456,10 +459,15 @@ const styles = {
     boxShadow: "inset 0 0 0 1px rgba(255,255,255,.04)",
     transition: "border-color .15s, box-shadow .15s",
   },
+
   sendBtn: {
     border: "none",
     cursor: "pointer",
-    padding: "10px 16px",
+    height: 45,                // <- igual a la altura del textarea
+    padding: "0 16px",         // <- vertical 0 para centrar
+    display: "inline-flex",    // <- centra contenido
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: 16,
     fontWeight: 700,
     color: "#0b1220",

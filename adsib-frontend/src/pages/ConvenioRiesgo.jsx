@@ -38,6 +38,19 @@ const normalize = (s="") => s.replace(/\r/g,"").replace(/[ \t]+\n/g,"\n").trim()
 const esc = (s="") => s.replace(/[&<>"']/g, (m) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
 const stripAccents = (s="") => s.normalize?.("NFD").replace(/[\u0300-\u036f]/g,"") ?? s;
 
+/** Canoniza un token para juntar variantes (plurales, acentos, espacios) */
+function canonToken(s = "") {
+  let t = stripAccents(String(s).toLowerCase().trim()).replace(/\s+/g, " ");
+  const singularizeWord = (w) => {
+    if (w.length <= 4) return w;
+    if (/[^aeiou]es$/.test(w)) return w.slice(0, -2);
+    if (/s$/.test(w)) return w.slice(0, -1);
+    return w;
+  };
+  t = t.split(" ").map(singularizeWord).join(" ");
+  return t;
+}
+
 /** Ubicación (página/fila) basada en \f y saltos de línea reales */
 function buildLinesIndex(text=""){
   const lines = [];
@@ -45,32 +58,19 @@ function buildLinesIndex(text=""){
   let start = 0, buf = "";
   const pushLine = (endIdx) => {
     lines.push({ page, line, start, end: endIdx, text: buf });
-    line += 1; buf = ""; start = endIdx + 1; // siguiente empieza después del separador
+    line += 1; buf = ""; start = endIdx + 1;
   };
   for (let i=0; i<text.length; i++){
     const ch = text[i];
     if (ch === "\f"){
-      // cerrar línea actual si venía texto sin \n
-      if (buf.length){
-        pushLine(i-1);
-      }
-      // salto de página (no es línea)
-      page += 1;
-      line = 1;
-      start = i + 1;
-      buf = "";
+      if (buf.length){ pushLine(i-1); }
+      page += 1; line = 1; start = i + 1; buf = "";
       continue;
     }
-    if (ch === "\n"){
-      pushLine(i);
-      continue;
-    }
+    if (ch === "\n"){ pushLine(i); continue; }
     buf += ch;
   }
-  // última línea si quedó buffer
-  if (start <= text.length){
-    lines.push({ page, line, start, end: text.length, text: buf });
-  }
+  if (start <= text.length){ lines.push({ page, line, start, end: text.length, text: buf }); }
   return lines;
 }
 
@@ -80,7 +80,6 @@ function pageLineFromIndexUsing(lines, absIndex){
     const L = lines[i];
     if (absIndex >= L.start && absIndex < L.end) return { page: L.page, line: L.line };
   }
-  // si apunta a salto de línea/form feed justo, buscar la anterior
   for (let i=lines.length-1; i>=0; i--){
     if (absIndex >= lines[i].start) return { page: lines[i].page, line: lines[i].line };
   }
@@ -95,10 +94,10 @@ const styleFromMatch = (m) => {
   return { ...(SEV[sev] || SEV.NONE), kind:"rule", severity: sev };
 };
 
-/** Mapa token -> estilo (anticipación > regla; mayor severidad > menor). */
-function buildTokenStyles(matches=[]) {
+/** Mapa token-canónico -> estilo (anticipación > regla; mayor severidad > menor). */
+function buildTokenStyles(matches = []) {
   const map = new Map();
-  const rank = { HIGH:3, MEDIUM:2, LOW:1, NONE:0 };
+  const rank = { HIGH: 3, MEDIUM: 2, LOW: 1, NONE: 0 };
   const put = (key, base) => {
     const prev = map.get(key);
     if (!prev) { map.set(key, base); return; }
@@ -107,12 +106,13 @@ function buildTokenStyles(matches=[]) {
     if (rank[base.severity] > rank[prev.severity]) map.set(key, base);
   };
   matches.forEach(m => {
-    const token = (m.token || "").trim();
-    if (!token) return;
+    const raw = (m.token || "").trim();
+    if (!raw) return;
     const base = styleFromMatch(m);
-    const k1 = token.toLowerCase();
-    const k2 = stripAccents(k1);
-    put(k1, base); if (k2 !== k1) put(k2, base);
+    const kCanon = canonToken(raw);
+    const kSans  = stripAccents(kCanon);
+    put(kCanon, base);
+    if (kSans !== kCanon) put(kSans, base);
   });
   return map;
 }
@@ -124,37 +124,42 @@ const tokenRegex = (token) => {
   return new RegExp(escTok, "gi");
 };
 
-/** Snippets: usa offsets si existen; si no, cae a regex. Devuelve rango absoluto + ubicación. */
+/**
+ * Snippets desde matches:
+ * - usa offsets si existen; si no, cae a regex.
+ * - DEDUP por (token canónico + página + línea) para no repetir el mismo fragmento.
+ */
 function makeSnippetsFromMatches(text="", matches=[], linesIndex=[], max=24) {
   const out = [];
   const base = stripAccents(text).toLowerCase();
-  const seen = new Set();
+  const seen = new Set(); // clave: tokenCanon|pX|lY
 
   for (const m of matches || []) {
     const st = styleFromMatch(m);
+    const rawTok = (m.token || "").trim();
+    const tokCanon = canonToken(rawTok);
 
     // --- con offsets exactos ---
     if (Number.isInteger(m.start) && Number.isInteger(m.end) && m.end > m.start) {
       const s = Math.max(0, m.start), e = Math.min(text.length, m.end);
-      // ventana en la MISMA línea si es posible (mejor lectura)
       const leftNL  = text.lastIndexOf("\n", s-1);
       const rightNL = text.indexOf("\n", e);
       const ctxS = Math.max(0, leftNL !== -1 ? leftNL+1 : Math.max(0, s-160));
       const ctxE = Math.min(text.length, rightNL !== -1 ? rightNL : Math.min(text.length, e+220));
       const raw = text.slice(ctxS, ctxE).trim();
-      const key = `${s}-${e}||${raw}`;
+      const loc = pageLineFromIndexUsing(linesIndex, s);
+      const key = `${tokCanon}|p${loc.page}|l${loc.line}`;
       if (!seen.has(key)) {
         seen.add(key);
-        const loc = pageLineFromIndexUsing(linesIndex, s);
-        out.push({ token: m.token || "", raw, style: st, startAbs: ctxS, endAbs: ctxE, page: loc.page, line: loc.line });
+        out.push({ token: rawTok || "", raw, style: st, startAbs: ctxS, endAbs: ctxE, page: loc.page, line: loc.line });
       }
       if (out.length >= max) break;
       continue;
     }
 
     // --- sin offsets: regex flexible ---
-    const tok = (m.token || "").trim(); if (!tok) continue;
-    const re  = tokenRegex(tok);
+    if (!rawTok) continue;
+    const re  = tokenRegex(rawTok);
     let mt;
     while ((mt = re.exec(base)) !== null) {
       const sIdx = mt.index, eIdx = sIdx + mt[0].length;
@@ -163,14 +168,13 @@ function makeSnippetsFromMatches(text="", matches=[], linesIndex=[], max=24) {
       const ctxS = Math.max(0, leftNL !== -1 ? leftNL+1 : Math.max(0, sIdx-160));
       const ctxE = Math.min(text.length, rightNL !== -1 ? rightNL : Math.min(text.length, eIdx+220));
       const raw  = text.slice(ctxS, ctxE).trim();
-      const key  = tok.toLowerCase() + "||" + raw;
+      const loc  = pageLineFromIndexUsing(linesIndex, sIdx);
+      const key  = `${tokCanon}|p${loc.page}|l${loc.line}`;
       if (!seen.has(key)) {
         seen.add(key);
-        const loc = pageLineFromIndexUsing(linesIndex, sIdx);
-        out.push({ token: tok, raw, style: st, startAbs: ctxS, endAbs: ctxE, page: loc.page, line: loc.line });
+        out.push({ token: rawTok, raw, style: st, startAbs: ctxS, endAbs: ctxE, page: loc.page, line: loc.line });
       }
       if (out.length >= max) break;
-      // avanzar sin solaparse para no "comer" letras
       re.lastIndex = sIdx + Math.max(1, mt[0].length);
     }
     if (out.length >= max) break;
@@ -178,21 +182,24 @@ function makeSnippetsFromMatches(text="", matches=[], linesIndex=[], max=24) {
   return out;
 }
 
-const countTokens = (tokens=[]) => {
-  const map = new Map();
-  tokens.forEach(t => {
-    const k = (t||"").trim().toLowerCase();
+/** Conteo por token canónico basado en SNIPPETS (fragmentos únicos) */
+function countTokensFromSnippets(snippets = []) {
+  const map = new Map(); // tokenCanon -> Set de "p|l"
+  snippets.forEach(s => {
+    const k = canonToken(s.token || "");
     if (!k) return;
-    map.set(k, (map.get(k)||0)+1);
+    const bucket = map.get(k) || new Set();
+    bucket.add(`p${s.page}|l${s.line}`);
+    map.set(k, bucket);
   });
   return [...map.entries()]
-    .map(([token, count]) => ({ token, count }))
+    .map(([token, set]) => ({ token, count: set.size }))
     .sort((a,b)=> b.count - a.count || a.token.localeCompare(b.token));
-};
+}
 
-function matchDensity(text="", tokens=[]) {
-  if (!text || !tokens?.length) return 0;
-  const uniq = [...new Set(tokens.filter(Boolean))];
+function matchDensity(text="", tokensCanonUnique=[]) {
+  if (!text || !tokensCanonUnique?.length) return 0;
+  const uniq = [...new Set(tokensCanonUnique)];
   let total = 0; uniq.forEach(t => { total += t.length; });
   return Math.min(1, total / Math.max(1, text.length));
 }
@@ -203,7 +210,6 @@ function highlightByMatches(text="", matches=[], extraQuery="") {
   const n = text.length;
   const base = stripAccents(text).toLowerCase();
 
-  // dos capas
   const primary = new Array(n).fill(null);
   const hasSem  = new Array(n).fill(false);
   const sevRank = { HIGH:3, MEDIUM:2, LOW:1, NONE:0 };
@@ -283,10 +289,9 @@ const modelFriendly = (m = "") => {
 const fmtFecha = (s) => {
   if (!s) return "—";
   try {
-    // ⚠️ Corrección del warning: se elimina el escape innecesario del guion en la clase de caracteres
     const hasTZ = /([zZ])|([+-]\d{2}:?\d{2})$/.test(s);
     let iso = s.includes("T") ? s : s.replace(" ", "T");
-    if (!hasTZ) iso += "Z"; // si no trae zona, tratamos como UTC
+    if (!hasTZ) iso += "Z";
     const d = new Date(iso);
     if (isNaN(d.getTime())) return s;
     return new Intl.DateTimeFormat("es-BO", {
@@ -389,33 +394,49 @@ export default function ConvenioRiesgo(){
   }, [texto, sel, conv?.id, loadHistory]);
 
   const matchesFull = useMemo(() => result?.matches || [], [result]);
-  const tokenStyles = useMemo(() => buildTokenStyles(matchesFull), [matchesFull]);
-
-  const allTokens      = useMemo(() => [...tokenStyles.keys()], [tokenStyles]);
-  const semanticTokens = useMemo(
-    () => matchesFull.filter(m=>String(m.source).toLowerCase()==="semantic")
-                     .map(m=>stripAccents((m.token||"").toLowerCase())),
-    [matchesFull]
-  );
-  const ruleTokens     = useMemo(
-    () => matchesFull.filter(m=>String(m.source).toLowerCase()!=="semantic")
-                     .map(m=>stripAccents((m.token||"").toLowerCase())),
-    [matchesFull]
-  );
 
   // Índice real de líneas (página/linea/start/end)
   const linesIndex = useMemo(() => buildLinesIndex(texto), [texto]);
 
-  const snippets   = useMemo(() => makeSnippetsFromMatches(texto, matchesFull, linesIndex, 24), [texto, matchesFull, linesIndex]);
-  const tokenTable = useMemo(() => countTokens(allTokens), [allTokens]);
-  const density    = useMemo(() => matchDensity(texto, allTokens), [texto, allTokens]);
+  // Snippets únicos por token canónico + pág + línea
+  const snippets = useMemo(
+    () => makeSnippetsFromMatches(texto, matchesFull, linesIndex, 24),
+    [texto, matchesFull, linesIndex]
+  );
 
-  // ==== Render de texto analizado por líneas (como el comparador) ====
+  // === Chips & contadores basados SOLO en SNIPPETS (evita duplicados) ===
+  const tokenTable = useMemo(() => countTokensFromSnippets(snippets), [snippets]);
+
+  // Estilo por token canónico, tomando severidad más fuerte entre los SNIPPETS
+  const tokenStyles = useMemo(() => {
+    const pseudoMatches = snippets.map(s => ({
+      token: canonToken(s.token || ""),
+      source: (s.style?.kind === "semantic" ? "semantic" : "rule"),
+      severity: s.style?.severity || "NONE"
+    }));
+    return buildTokenStyles(pseudoMatches);
+  }, [snippets]);
+
+  // Densidad usando tokens canónicos únicos presentes en snippets
+  const density = useMemo(
+    () => matchDensity(texto, [...new Set(snippets.map(s => canonToken(s.token||"")).filter(Boolean))]),
+    [texto, snippets]
+  );
+
+  // Para resumen rápido
+  const semanticTokens = useMemo(
+    () => snippets.filter(s => s.style?.kind === "semantic").map(s => canonToken(s.token||"")),
+    [snippets]
+  );
+  const ruleTokens = useMemo(
+    () => snippets.filter(s => s.style?.kind !== "semantic").map(s => canonToken(s.token||"")),
+    [snippets]
+  );
+
+  // ==== Render de texto analizado por líneas ====
   const analyzedRows = useMemo(() => {
-    // Para cada línea, recortar matches a su rango y resaltar
     return linesIndex.map((L) => {
       const localMatches = (matchesFull || []).flatMap((m) => {
-        // preferir offsets exactos
         if (Number.isInteger(m.start) && Number.isInteger(m.end)) {
           const s = Math.max(L.start, m.start);
           const e = Math.min(L.end,   m.end);
@@ -424,7 +445,6 @@ export default function ConvenioRiesgo(){
           }
           return [];
         }
-        // fallback por regex si no hay offsets
         const tok = (m.token || "").trim();
         if (!tok) return [];
         const re = tokenRegex(tok);
@@ -438,12 +458,7 @@ export default function ConvenioRiesgo(){
       });
 
       const html = highlightByMatches(L.text, localMatches, q).__html;
-      return {
-        page: L.page,
-        line: L.line,
-        html,
-        key: `${L.page}-${L.line}-${L.start}`
-      };
+      return { page: L.page, line: L.line, html, key: `${L.page}-${L.line}-${L.start}` };
     });
   }, [linesIndex, matchesFull, q]);
 
@@ -535,11 +550,10 @@ export default function ConvenioRiesgo(){
             ) : (
               <div style={{display:"flex", gap:6, flexWrap:"wrap"}}>
                 {tokenTable.map(k => {
-                  const st = tokenStyles.get(k.token) || { bg:"#111827", fg:"#e5e7eb" };
-                  const chipStyle = { background: st.bg, color: st.fg, padding:"3px 6px", borderRadius:8, display:"inline-flex", alignItems:"center", gap:6, fontSize:12 };
+                  const st = tokenStyles.get(k.token) || { bg:"#111827", fg:"#e5e7eb", kind:"rule", severity:"NONE" };
                   const label = st.kind === "semantic" ? "anticipación" : (SEV[st.severity]?.label || "N/A");
                   return (
-                    <span key={k.token} style={chipStyle}>
+                    <span key={k.token} style={{ background: st.bg, color: st.fg, padding:"3px 6px", borderRadius:8, display:"inline-flex", alignItems:"center", gap:6, fontSize:12 }}>
                       {k.token} <span style={{opacity:.9}}>×{k.count}</span>
                       <span style={{background:"rgba(0,0,0,.18)", padding:"0 6px", borderRadius:6, fontSize:11}}>{label}</span>
                     </span>
@@ -631,14 +645,13 @@ export default function ConvenioRiesgo(){
               const isSemantic = stMain.kind === "semantic";
               const ringColor = isSemantic ? SEMANTIC.ring : (RING[stMain.severity] || RING.NONE);
 
-              // --- SOLO su tipo: si es anticipación, solo anticipaciones; si es regla, solo esa severidad ---
+              // Solo coincidencias del MISMO tipo/severidad que pintan dentro del fragmento
               const filterSameType = (m) => {
                 const ms = styleFromMatch(m);
                 if (isSemantic) return ms.kind === "semantic";
                 return ms.kind === "rule" && ms.severity === stMain.severity;
               };
 
-              // matches que caen dentro del rango del fragmento -> offsets relativos
               const localMatches = (matchesFull || []).flatMap(m => {
                 if (!filterSameType(m)) return [];
                 if (Number.isInteger(m.start) && Number.isInteger(m.end) && s.startAbs != null) {
@@ -649,7 +662,6 @@ export default function ConvenioRiesgo(){
                   }
                   return [];
                 }
-                // sin offsets: incluir si el token aparece dentro del raw
                 const tok = (m.token || "").trim();
                 if (!tok) return [];
                 const re = tokenRegex(tok);
@@ -662,7 +674,7 @@ export default function ConvenioRiesgo(){
               const localHtml = highlightByMatches(s.raw, localMatches).__html;
 
               return (
-                <div key={i} style={{
+                <div key={`${canonToken(s.token)}|p${s.page}|l${s.line}`} style={{
                   border:"1px solid rgba(255,255,255,.08)",
                   borderRadius:8,
                   padding:8,
@@ -671,7 +683,7 @@ export default function ConvenioRiesgo(){
                   fontSize:13
                 }}>
                   <div style={{fontSize:11.5, opacity:.9, marginBottom:6, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap"}}>
-                    #{i+1} · {s.token}
+                    #{i+1} · {canonToken(s.token)}
                     <span style={{background: stMain.bg, color: stMain.fg, borderRadius:6, padding:"2px 6px", fontSize:10.5}}>
                       {isSemantic ? "anticipación" : (SEV[stMain.severity]?.label || "N/A")}
                     </span>
@@ -685,7 +697,7 @@ export default function ConvenioRiesgo(){
         )}
       </div>
 
-      {/* texto analizado — AHORA con columnas Pág / Línea / Texto */}
+      {/* texto analizado */}
       <div className="card" style={{marginTop:8, padding:10}}>
         <h3 style={{margin:0, fontSize:15}}>Texto analizado</h3>
         <div style={{marginTop:8, border:"1px solid rgba(255,255,255,.08)", borderRadius:8, overflow:"hidden"}}>

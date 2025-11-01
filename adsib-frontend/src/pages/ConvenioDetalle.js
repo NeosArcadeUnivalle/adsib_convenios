@@ -47,23 +47,19 @@ export default function ConvenioDetalle() {
   const vInputRef = useRef(null);
 
   const normalizeIndexPayload = (resData) => {
-    // Soporta backend paginado {data, meta} o antiguo [array]
     if (Array.isArray(resData)) {
       return {
         data: resData.slice(0, PER_PAGE),
         meta: { current_page: 1, last_page: 1, total: resData.length }
       };
     }
-    // Laravel paginator standard
     if (resData?.data && resData?.meta) {
       return { data: resData.data, meta: resData.meta };
     }
-    // Laravel simplePaginate
     if (resData?.data && resData?.current_page) {
       const { data, current_page, last_page, total } = resData;
       return { data, meta: { current_page, last_page, total } };
     }
-    // Fallback
     return { data: [], meta: { current_page: 1, last_page: 1, total: 0 } };
   };
 
@@ -98,10 +94,22 @@ export default function ConvenioDetalle() {
     loadPage(1);
   }, [loadConvenio, loadPage]);
 
+  const isClosed = (c?.estado || "").toUpperCase() === "CERRADO";
+  const formDisabled = uploading || loadingList || isClosed;
+
   /* ====== Versiones ====== */
   const crearVersion = async (e) => {
     e.preventDefault();
     if (!vFile) return;
+
+    // Confirmación SOLO si cierra negociación
+    if (finalizar) {
+      const ok = window.confirm(
+        "¿Confirmas que esta es la versión FINAL?\n" +
+        "Esto cerrará la negociación del convenio."
+      );
+      if (!ok) return;
+    }
 
     const fd = new FormData();
     fd.append("archivo", vFile);
@@ -140,6 +148,34 @@ export default function ConvenioDetalle() {
     }
   };
 
+  const reabrirConvenio = async () => {
+    const ok = window.confirm(
+      "¿Deseas habilitar nuevamente la carga de versiones?\n" +
+      "El estado del convenio pasará a NEGOCIACIÓN."
+    );
+    if (!ok) return;
+
+    try {
+      // Preferencia: endpoint dedicado
+      await api.post(`/convenios/${id}/reabrir`);
+    } catch (e1) {
+      // Fallback si el endpoint dedicado no existe
+      try {
+        await api.patch(`/convenios/${id}/estado`, { estado: "NEGOCIACION" });
+      } catch (e2) {
+        alert(
+          e2.response?.data?.message ||
+          e1.response?.data?.message ||
+          "No se pudo habilitar nuevamente."
+        );
+        return;
+      }
+    }
+    // Refrescar cabecera y lista
+    await loadConvenio();
+    await loadPage(1);
+  };
+
   const descargarV = async (vid) => {
     try {
       const res = await api.get(`/versiones/${vid}/descargar`, { responseType: "blob" });
@@ -157,20 +193,15 @@ export default function ConvenioDetalle() {
     if (!window.confirm("¿Eliminar esta versión?")) return;
     try {
       await api.delete(`/versiones/${vid}`);
-      if (page === 1) {
-        setVersiones(prev => prev.filter(x => x.id !== vid));
-      }
-      setMeta(m => {
-        const total = Math.max(0, (m.total || 1) - 1);
-        const last  = Math.max(1, Math.ceil(total / PER_PAGE));
-        const newPage = Math.min(page, last);
-        if (newPage !== page) {
-          setPage(newPage);
-          loadPage(newPage);
-        }
-        return { ...m, total, last_page: last };
-      });
-      await loadPage(page);
+
+      const newTotal = Math.max(0, (meta.total || 1) - 1);
+      const newLast  = Math.max(1, Math.ceil(newTotal / PER_PAGE));
+      const newPage  = Math.min(page, newLast);
+
+      setMeta((m) => ({ ...m, total: newTotal, last_page: newLast, current_page: newPage }));
+      setPage(newPage);
+
+      await loadPage(newPage);
     } catch (err) {
       alert(err.response?.data?.message || "No se pudo eliminar la versión.");
     }
@@ -219,31 +250,116 @@ export default function ConvenioDetalle() {
       <div className="card" style={{marginTop:14}}>
         <h3 style={{marginTop:0}}>Versiones</h3>
 
-        <form onSubmit={crearVersion} style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", marginBottom:10 }}>
-          <input
-            ref={vInputRef}
-            type="file"
-            accept=".pdf,.docx"
-            onChange={(e)=>setVFile(e.target.files?.[0]||null)}
-          />
-          <input
-            placeholder="Observaciones"
-            value={observ}
-            onChange={(e)=>setObserv(e.target.value)}
-            style={{minWidth:240}}
-          />
-          <label style={{display:"inline-flex", alignItems:"center", gap:6}}>
-            <input type="checkbox" checked={finalizar} onChange={(e)=>setFinalizar(e.target.checked)} />
-            Marcar como versión final (cerrar convenio)
-          </label>
-          <button
-            type="submit"
-            className="btn"
-            style={{...BTN.info, ...( !vFile || uploading ? BTN.disabled : {})}}
-            disabled={!vFile || uploading}
+        {/* Banner de bloqueo cuando está CERRADO */}
+        {isClosed && (
+          <div
+            className="card"
+            style={{
+              background:"rgba(234,179,8,.12)",
+              borderColor:"rgba(234,179,8,.45)",
+              display:"flex",
+              alignItems:"center",
+              justifyContent:"space-between",
+              gap:12,
+              padding:12,
+              marginBottom:10,
+            }}
           >
-            {uploading ? "Subiendo..." : "Nueva versión"}
-          </button>
+            <div style={{fontSize:14}}>
+              <strong>Convenio cerrado.</strong> No es posible subir nuevas versiones.
+            </div>
+            <button className="btn" style={BTN.warn} onClick={reabrirConvenio}>
+              Habilitar nuevamente
+            </button>
+          </div>
+        )}
+
+        {/* Nueva versión — layout claro */}
+        <form onSubmit={crearVersion} style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+          {/* Selector de archivo */}
+          <div style={{gridColumn:"1 / span 1"}}>
+            <label style={{display:"block", fontWeight:700, marginBottom:6}}>Archivo</label>
+            <input
+              ref={vInputRef}
+              id="vfile"
+              type="file"
+              accept=".pdf,.docx"
+              onChange={(e)=>setVFile(e.target.files?.[0]||null)}
+              style={{ display:"none" }}
+              disabled={formDisabled}
+            />
+            <div style={{display:"flex", gap:8, alignItems:"center", flexWrap:"wrap"}}>
+              <label htmlFor="vfile" className="btn" style={{...BTN.info, ...(formDisabled ? BTN.disabled : {})}}>
+                Seleccionar archivo
+              </label>
+              <span style={{opacity:.9}}>
+                {vFile ? vFile.name : "Ningún archivo seleccionado"}
+              </span>
+            </div>
+            <div style={{fontSize:12, opacity:.8, marginTop:6}}>
+              Formatos permitidos: PDF o DOCX. Tamaño máx. 20MB.
+            </div>
+          </div>
+
+          {/* Observaciones grande */}
+          <div style={{gridColumn:"2 / span 1"}}>
+            <label style={{display:"block", fontWeight:700, marginBottom:6}}>Observaciones</label>
+            <textarea
+              rows={4}
+              placeholder="Detalles opcionales de esta versión…"
+              value={observ}
+              onChange={(e)=>setObserv(e.target.value)}
+              style={{
+                width:"100%",
+                padding:"10px 12px",
+                borderRadius:10,
+                minHeight:96
+              }}
+              disabled={formDisabled}
+            />
+          </div>
+
+          {/* Bloque versión final + botón acciones */}
+          <div style={{gridColumn:"1 / span 2", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap"}}>
+            <label
+              style={{
+                display:"inline-flex",
+                alignItems:"center",
+                gap:10,
+                padding:"10px 12px",
+                borderRadius:10,
+                background:"rgba(234,179,8,.12)",
+                boxShadow:"0 0 0 1px rgba(234,179,8,.35) inset",
+                cursor: formDisabled ? "not-allowed" : "pointer",
+                opacity: formDisabled ? .6 : 1
+              }}
+              title="Marca esta casilla si esta versión es la final. Se cerrará la negociación."
+            >
+              <input
+                type="checkbox"
+                checked={finalizar}
+                onChange={(e)=>setFinalizar(e.target.checked)}
+                style={{ width:18, height:18 }}
+                disabled={formDisabled}
+              />
+              <div style={{display:"grid"}}>
+                <strong style={{lineHeight:1}}>Marcar como versión FINAL</strong>
+                <span style={{fontSize:12, opacity:.9}}>Cierra la negociación del convenio</span>
+              </div>
+            </label>
+
+            <button
+              type="submit"
+              className="btn"
+              style={{
+                ...BTN.action,
+                ...((!vFile || uploading || formDisabled) ? BTN.disabled : {})
+              }}
+              disabled={!vFile || uploading || formDisabled}
+            >
+              {uploading ? "Subiendo..." : "Agregar versión"}
+            </button>
+          </div>
         </form>
 
         <div style={{overflowX:"auto"}}>

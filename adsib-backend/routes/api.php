@@ -55,7 +55,9 @@ Route::middleware('auth:sanctum')->group(function () {
     /* Archivo FINAL (última versión + cerrar convenio) */
     Route::post ('/convenios/{id}/archivo-final',            [ConvenioController::class, 'uploadArchivoFinal']);
     Route::get  ('/convenios/{id}/archivo-final/descargar',  [ConvenioController::class, 'descargarArchivoFinal']);
- 
+    Route::post ('/convenios/{id}/reabrir', [ConvenioController::class, 'reabrir']);
+    Route::patch('/convenios/{id}/estado',  [ConvenioController::class, 'patchEstado']);
+    
     /* Versiones */
     Route::get   ('/convenios/{id}/versiones',  [VersionController::class, 'index']);
     Route::post  ('/convenios/{id}/versiones',  [VersionController::class, 'store']);

@@ -112,13 +112,22 @@ export default function ConvenioCreate(){
         {/* Título */}
         <div style={{gridColumn:"1 / span 12"}}>
           <label style={{display:"block", marginBottom:6}}>Título</label>
-          <input
-            value={f.titulo}
-            onKeyDown={onKeyDownTitulo}
-            onPaste={onPasteSanitize}
-            onChange={(e)=>setF(s=>({...s,titulo:e.target.value}))}
-            placeholder="Escribe un título descriptivo…"
-          />
+            <input
+              value={f.titulo}
+              onKeyDown={onKeyDownTitulo}
+              onPaste={onPasteSanitize}
+              onChange={(e)=>setF(s=>({...s,titulo:e.target.value}))}
+              placeholder="Escribe un título descriptivo…"
+              /* 👇 ancho completo + mejor usabilidad */
+              style={{
+                width: "100%",
+                maxWidth: "980px",     // respetará el ancho de la card; ajústalo si quieres
+                padding: "12px 14px",
+                fontSize: 16,
+                lineHeight: 1.4,
+                borderRadius: 10
+              }}
+            />
           {errors.titulo && <div style={{color:"#b91c1c"}}>{errors.titulo}</div>}
         </div>
  

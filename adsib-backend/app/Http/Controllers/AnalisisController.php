@@ -65,10 +65,92 @@ class AnalisisController extends Controller
         return false;
     }
 
+    /* ----------------- Helpers para deduplicación por solapamiento ----------------- */
+
+    /** Normalización "estricta" de token para comparar similitud */
+    protected function normToken(string $t): string
+    {
+        $t = $this->norm($t);
+        $t = preg_replace('/\s+/', ' ', $t ?? '') ?? '';
+        return trim($t);
+    }
+
+    /** IoU (intersección / unión) de dos rangos [a1,a2), [b1,b2) -> 0..1 */
+    protected function iou(int $a1, int $a2, int $b1, int $b2): float
+    {
+        if ($a2 <= $a1 || $b2 <= $b1) return 0.0;
+        $inter = max(0, min($a2, $b2) - max($a1, $b1));
+        $union = max($a2, $b2) - min($a1, $b1);
+        if ($union <= 0) return 0.0;
+        return $inter / $union;
+    }
+
+    /**
+     * Deduplica matches que:
+     *  - comparten tipo de fuente (regla vs. semántico) y severidad
+     *  - y su token normalizado es "similar" (exacto tras normalización)
+     *  - y sus rangos con offsets se solapan con IoU >= 0.6
+     * Se conserva el de mayor cobertura (rango más largo); si igual, el primero.
+     */
+    protected function dedupeOverlaps(array $matches): array
+    {
+        $kept = [];
+        foreach ($matches as $m) {
+            $tok = $this->normToken((string)($m['token'] ?? ''));
+            $src = strtolower((string)($m['source'] ?? ''));
+            $sev = strtoupper((string)($m['severity'] ?? 'NONE'));
+
+            $hasOff = isset($m['start'], $m['end']) && is_numeric($m['start']) && is_numeric($m['end']) && ($m['end'] > $m['start']);
+            if (!$hasOff || $tok === '') {
+                // Si no hay offsets confiables o token vacío, no arriesgamos a fusionar — lo dejamos pasar.
+                $kept[] = $m;
+                continue;
+            }
+
+            $s1 = (int)$m['start']; $e1 = (int)$m['end'];
+            $merged = false;
+
+            // buscamos en kept algún candidato para fusionar
+            foreach ($kept as $idx => $prev) {
+                $tok2 = $this->normToken((string)($prev['token'] ?? ''));
+                $src2 = strtolower((string)($prev['source'] ?? ''));
+                $sev2 = strtoupper((string)($prev['severity'] ?? 'NONE'));
+
+                $hasOff2 = isset($prev['start'], $prev['end']) && is_numeric($prev['start']) && is_numeric($prev['end']) && ($prev['end'] > $prev['start']);
+                if (!$hasOff2) continue;
+
+                // misma "clase" de match
+                if ($src !== $src2 || $sev !== $sev2) continue;
+                // tokens equivalentes tras normalización (evita "precio preferen" vs "precios preferen")
+                if ($tok !== $tok2) continue;
+
+                $s2 = (int)$prev['start']; $e2 = (int)$prev['end'];
+                $over = $this->iou($s1, $e1, $s2, $e2);
+
+                if ($over >= 0.60) {
+                    // elegir el que cubra más (rango más largo). Si igual, mantenemos el anterior.
+                    $len1 = $e1 - $s1;
+                    $len2 = $e2 - $s2;
+                    if ($len1 > $len2) {
+                        $kept[$idx] = $m;
+                    }
+                    $merged = true;
+                    break;
+                }
+            }
+
+            if (!$merged) {
+                $kept[] = $m;
+            }
+        }
+        return array_values($kept);
+    }
+
     /**
      * Filtra/depura coincidencias SEMANTIC y pondera el score final.
      * - Elimina anticipaciones sin palabra núcleo.
      * - Elimina anticipaciones con negación contextual.
+     * - Deduplica coincidencias solapadas (misma cláusula repetida).
      * - Reduce fuerte el peso de lo semántico y limita su aporte global.
      */
     protected function filterAndScore(array $matches, string $fullText): array
@@ -91,9 +173,11 @@ class AnalisisController extends Controller
             $clean[] = $m;
         }
 
+        // 1.5) DEDUP por solapamiento (misma fuente+severidad+token similar, offsets que se pisan)
+        $clean = $this->dedupeOverlaps($clean);
+
         // 2) ponderación
         $W_RULE = ['HIGH'=>1.00,'MEDIUM'=>0.60,'LOW'=>0.30,'NONE'=>0.00];
-        // aún más bajo que antes
         $W_SEM  = ['HIGH'=>0.15,'MEDIUM'=>0.08,'LOW'=>0.03,'NONE'=>0.00];
 
         $CAP_SEM = 0.35; // el aporte semántico no puede pasar del 35% del aporte por reglas
@@ -158,7 +242,7 @@ class AnalisisController extends Controller
         $matches = is_array($data['matches'] ?? null) ? $data['matches'] : [];
         $modelo  = (string) ($data['summary']['model_embedder'] ?? 'tfidf-pipeline');
 
-        // Depurar anticipaciones y recalcular score/risk
+        // Depurar anticipaciones, deduplicar y recalcular score/risk
         $calc = $this->filterAndScore($matches, $text);
 
         // Reemplazar matches por los depurados (lo que ves y lo que se guarda)
@@ -275,17 +359,17 @@ class AnalisisController extends Controller
         $convenioId = $request->query('convenio_id');
         $perPage    = (int) ($request->query('per') ?? 10);
         $page       = (int) ($request->query('page') ?? 1);
-    
+
         if (!$convenioId) {
             return response()->json(['message' => 'convenio_id es requerido'], 422);
         }
-    
+
         $query = DB::table('analisis_riesgos')
             ->where('convenio_id', $convenioId)
             ->orderByDesc('analizado_en');
-    
+
         $total = (clone $query)->count();
-    
+
         // Traemos y convertimos fechas a ISO-8601 con zona horaria explícita
         $rawItems = $query->forPage($page, $perPage)->get();
         $items = $rawItems->map(function ($r) {
@@ -294,7 +378,7 @@ class AnalisisController extends Controller
             $r->updated_at   = \Carbon\Carbon::parse($r->updated_at)->toIso8601String();
             return $r;
         });
-    
+
         return response()->json([
             'data' => $items,
             'meta' => [

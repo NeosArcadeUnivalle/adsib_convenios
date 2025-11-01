@@ -154,63 +154,88 @@ class VersionController extends Controller
         return response()->json($paginator, 200, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     }
 
-    public function store(Request $r, $convenioId)
+    public function store(Request $request, $id)
     {
-        $c = Convenio::findOrFail($convenioId);
-
-        $r->validate([
-            'archivo'       => 'required|file|mimes:pdf,docx|max:20480',
-            'observaciones' => 'nullable|string|max:4000',
-            'final'         => 'nullable|boolean',
+        // 1) Validación
+        $data = $request->validate([
+            'archivo'        => 'required|file|mimes:pdf,docx|max:20480',
+            'observaciones'  => 'nullable|string|max:4000',
+            'final'          => 'nullable|boolean',
         ]);
 
-        $file = $r->file('archivo');
-        $name = $this->toUtf8($file->getClientOriginalName());
+        // 2) Convenio
+        $convenio = \App\Models\Convenio::findOrFail($id);
 
-        $next = (int) VersionConvenio::where('convenio_id', $c->id)->max('numero_version') + 1;
-        $path = $this->saveFilePath($c->id, $next, $file);
-
-        $obs  = $r->boolean('final')
-            ? 'Versión final'
-            : ($this->toUtf8($r->input('observaciones')) ?: 'Actualización');
-
-        // 🔹 Nuevo: intentar extraer texto del documento y guardarlo
-        $textoExtraido = $this->tryExtractText($path);
-
-        $version = VersionConvenio::create([
-            'convenio_id'              => $c->id,
-            'numero_version'           => $next,
-            'archivo_nombre_original'  => $name,
-            'archivo_path'             => $path,
-            'fecha_version'            => now(),
-            'observaciones'            => $obs,
-            'texto'                    => $textoExtraido, // 👈 aquí se guarda el texto para el asistente
-            'created_at'               => now(),
-        ]);
-
-        $prev = VersionConvenio::where('convenio_id', $c->id)
-            ->where('numero_version', $next - 1)
-            ->first();
-
-        $cmp = null;
-        if ($prev) $cmp = $this->makeComparison($prev, $version);
-
-        $c->archivo_nombre_original = $name;
-        $c->archivo_path            = $path;
-
-        if ($r->boolean('final')) {
-            $c->estado = 'CERRADO';
-        } elseif ($c->estado === 'BORRADOR') {
-            $c->estado = 'NEGOCIACION';
+        // Si está CERRADO, no permitir subir (debe reabrirse explícitamente)
+        if ($convenio->estado === 'CERRADO') {
+            return response()->json([
+                'message' => 'El convenio está CERRADO. Usa "Habilitar nuevamente" para reabrirlo antes de subir nuevas versiones.'
+            ], 422);
         }
-        $c->save();
 
-        return response()->json(
-            ['version' => $version, 'comparacion' => $cmp],
-            201,
-            [],
-            JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
-        );
+        // 3) Preparar archivo
+        $file       = $request->file('archivo');
+        $origName   = $this->toUtf8($file->getClientOriginalName() ?? 'archivo');
+        $storedName = now()->format('Ymd_His') . '_' . $origName; // evita colisiones/caché
+        $path       = \Illuminate\Support\Facades\Storage::putFileAs("convenios/{$convenio->id}", $file, $storedName);
+
+        // 4) Calcular número de versión siguiente
+        $max = (int) \App\Models\VersionConvenio::where('convenio_id', $convenio->id)->max('numero_version');
+        $numero = $max > 0 ? ($max + 1) : 1;
+
+        // 5) Extraer texto (opcional; requiere Smalot\PdfParser para PDF)
+        $texto = null;
+        try {
+            $abs = \Illuminate\Support\Facades\Storage::path($path);
+            $ext = strtolower(pathinfo($abs, PATHINFO_EXTENSION));
+            if ($ext === 'docx' && class_exists(\ZipArchive::class)) {
+                $zip = new \ZipArchive();
+                if ($zip->open($abs) === true) {
+                    $xml = $zip->getFromName('word/document.xml');
+                    $zip->close();
+                    if ($xml !== false) {
+                        $xml = preg_replace('/<\/w:p>/', "\n", $xml);
+                        $xml = preg_replace('/<\/w:tr>/', "\n", $xml);
+                        $texto = $this->toUtf8(strip_tags($xml));
+                    }
+                }
+            } elseif ($ext === 'pdf' && class_exists(\Smalot\PdfParser\Parser::class)) {
+                $parser = new \Smalot\PdfParser\Parser();
+                $pdf    = $parser->parseFile($abs);
+                $texto  = $this->toUtf8($pdf->getText());
+            }
+        } catch (\Throwable $e) {
+            // silencioso: si falla la extracción, seguimos igual
+            $texto = null;
+        }
+
+        // 6) Crear versión
+        $version = \App\Models\VersionConvenio::create([
+            'convenio_id'             => $convenio->id,
+            'numero_version'          => $numero,
+            'archivo_nombre_original' => $origName,
+            'archivo_path'            => $path,
+            'fecha_version'           => now(),
+            'observaciones'           => $this->toUtf8($data['observaciones'] ?? null),
+            'texto'                   => $texto,
+        ]);
+
+        // 7) Asegurar estado del convenio:
+        //    - Si estaba en BORRADOR → pasa a NEGOCIACION
+        //    - Si llega como final → CERRADO
+        if ($convenio->estado === 'BORRADOR') {
+            $convenio->estado = 'NEGOCIACION';
+        }
+        if ($request->boolean('final')) {
+            $convenio->estado = 'CERRADO';
+        }
+        $convenio->save();
+
+        return response()->json([
+            'ok'       => true,
+            'version'  => $version,
+            'convenio' => $convenio,
+        ], 201, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     }
 
     public function download($versionId)

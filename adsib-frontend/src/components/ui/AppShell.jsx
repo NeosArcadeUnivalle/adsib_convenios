@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import api, { clearToken } from "../../api";
 import "./AppShell.css";
 
@@ -11,10 +11,10 @@ export default function AppShell() {
   // Popup (inline)
   const [showPopup, setShowPopup] = useState(false);
   const [counts, setCounts] = useState({
-    notificaciones: 0,       // alto + medio
-    convenios_vencidos: 0,
-    riesgo_alto: 0,
-    riesgo_medio: 0,
+    notificaciones: 0,       // = high + medium (según /notificaciones/alertas)
+    convenios_vencidos: 0,   // reservado para futuro
+    riesgo_alto: 0,          // = high.length
+    riesgo_medio: 0,         // = medium.length
   });
 
   // Permite forzar el popup manualmente con ?popup=1 (solo para pruebas)
@@ -23,29 +23,37 @@ export default function AppShell() {
     return qs.get("popup") === "1";
   }, [search]);
 
-  // Carga y refresca el overview para los badges (no abre popup)
+  /** Normaliza la respuesta de /notificaciones/alertas a {high[], medium[]} */
+  const parseAlertas = useCallback((data) => {
+    const high = Array.isArray(data?.high) ? data.high : (data?.altas || []);
+    const medium = Array.isArray(data?.medium) ? data.medium : (data?.medias || []);
+    return { high, medium };
+  }, []);
+
+  /** Carga contadores SIEMPRE desde /notificaciones/alertas (para que coincida con la vista) */
+  const fetchCountsFromAlertas = useCallback(async () => {
+    try {
+      const { data } = await api.get("/notificaciones/alertas");
+      const { high, medium } = parseAlertas(data);
+      setCounts({
+        notificaciones: (high?.length || 0) + (medium?.length || 0),
+        convenios_vencidos: 0,
+        riesgo_alto: high?.length || 0,
+        riesgo_medio: medium?.length || 0,
+      });
+    } catch {
+      // silencio: no romper la UI por errores intermitentes
+    }
+  }, [parseAlertas]);
+
+  // Carga y refresca el overview/badges (ahora basado en alertas)
   useEffect(() => {
     let timer;
-    const fetchOverview = () => {
-      api
-        .get("/dashboard/overview")
-        .then(({ data }) =>
-          setCounts({
-            notificaciones: Number(data?.notificaciones ?? 0),
-            convenios_vencidos: Number(data?.convenios_vencidos ?? 0),
-            riesgo_alto: Number(data?.riesgo_alto ?? 0),
-            riesgo_medio: Number(data?.riesgo_medio ?? 0),
-          })
-        )
-        .catch(() => {});
-    };
-
-    fetchOverview();
+    fetchCountsFromAlertas();
     // refresco cada 30s (solo actualiza contadores)
-    timer = setInterval(fetchOverview, 30000);
-
+    timer = setInterval(fetchCountsFromAlertas, 30000);
     return () => clearInterval(timer);
-  }, []);
+  }, [fetchCountsFromAlertas]);
 
   // Mostrar popup SOLO una vez: justo después del login y al aterrizar en "/"
   useEffect(() => {
@@ -53,18 +61,9 @@ export default function AppShell() {
     const justLogged = sessionStorage.getItem("just_logged_v2") === "1";
 
     const maybeShowOnce = async () => {
-      try {
-        const r = await api.get("/dashboard/overview");
-        setCounts({
-          notificaciones: Number(r.data?.notificaciones ?? 0),
-          convenios_vencidos: Number(r.data?.convenios_vencidos ?? 0),
-          riesgo_alto: Number(r.data?.riesgo_alto ?? 0),
-          riesgo_medio: Number(r.data?.riesgo_medio ?? 0),
-        });
-      } catch {}
+      await fetchCountsFromAlertas();   // usa mismas fuentes que la página
       setShowPopup(true);
-      // consumimos la marca para que NO se repita
-      sessionStorage.removeItem("just_logged_v2");
+      sessionStorage.removeItem("just_logged_v2"); // evitar repetición
     };
 
     // Modo pruebas ?popup=1: muestra siempre que estés en "/"
@@ -77,11 +76,9 @@ export default function AppShell() {
     if (justLogged && onHome) {
       maybeShowOnce();
     }
-  }, [pathname, forcePopup]);
+  }, [pathname, forcePopup, fetchCountsFromAlertas]);
 
-  const closePopup = () => {
-    setShowPopup(false);
-  };
+  const closePopup = () => setShowPopup(false);
 
   const goToNotifications = () => {
     closePopup();
@@ -89,9 +86,7 @@ export default function AppShell() {
   };
 
   const logout = async () => {
-    try {
-      await api.post("/auth/logout");
-    } catch {}
+    try { await api.post("/auth/logout"); } catch {}
     clearToken();
     nav("/login");
   };
@@ -140,6 +135,7 @@ export default function AppShell() {
             <span className="icon" aria-hidden />
             <span className="text">Asistente Virtual</span>
           </Link>
+
           <Link
             className={`nav-link ${pathname === "/" ? "active" : ""}`}
             to="/"

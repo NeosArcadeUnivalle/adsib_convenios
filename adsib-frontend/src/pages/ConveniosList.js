@@ -93,9 +93,37 @@ export default function ConveniosList() {
  
   const eliminar = async (id) => {
     if (!window.confirm("¿Eliminar este convenio? Esta acción no se puede deshacer.")) return;
+
+    const buildParams = (targetPage) => ({
+      q: f.q,
+      estado: f.estado,
+      fi_from: f.fi_from,
+      fi_to: f.fi_to,
+      fv_from: f.fv_from,
+      fv_to: f.fv_to,
+      sort: f.sort,
+      dir: f.dir,
+      page: targetPage,
+      per_page: f.per_page,
+    });
+
+    const reloadPageSmart = async (targetPage) => {
+      const r = await api.get("/convenios", { params: buildParams(targetPage) });
+      const data = r.data.data || [];
+      const newLast = r.data.last_page || r.data.meta?.last_page || 1;
+
+      if (data.length === 0 && targetPage > 1) {
+        return reloadPageSmart(targetPage - 1);
+      }
+
+      setRows(data);
+      setMeta({ last_page: newLast });
+      setF((s) => ({ ...s, page: targetPage }));
+    };
+
     try {
       await api.delete(`/convenios/${id}`);
-      setRows((x) => x.filter((r) => r.id !== id));
+      await reloadPageSmart(f.page);
     } catch (e) {
       alert(e.response?.data?.message || "No se pudo eliminar.");
     }

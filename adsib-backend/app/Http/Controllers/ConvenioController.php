@@ -208,48 +208,84 @@ class ConvenioController extends Controller
             'fecha_firma'       => 'nullable|date',
             'fecha_vencimiento' => 'nullable|date',
             'archivo'           => 'nullable|file|mimes:pdf,docx|max:20480',
+            'replace_strategy'  => 'nullable|string', // opcional: "base_and_v1"
         ]);
 
-        $c->update([
-            'titulo'            => $this->toUtf8($data['titulo']),
-            'descripcion'       => $this->toUtf8($data['descripcion'] ?? null),
-            'fecha_firma'       => $data['fecha_firma'] ?? null,
-            'fecha_vencimiento' => $data['fecha_vencimiento'] ?? null,
-        ]);
-
-        if ($r->hasFile('archivo')) {
-            $file = $r->file('archivo');
-            $name = $this->toUtf8($file->getClientOriginalName());
-            $path = Storage::putFileAs("convenios/{$c->id}", $file, $name);
-
-            $c->archivo_nombre_original = $name;
-            $c->archivo_path = $path;
-
-            if ($c->estado === 'BORRADOR') {
-                $c->estado = 'NEGOCIACION';
-            }
-            $c->save();
-
-            // crear nueva versión (n+1) guardando también el texto
-            $next = ((int) VersionConvenio::where('convenio_id', $c->id)->max('numero_version')) + 1;
-            $texto = $this->tryExtractText($path);
-
-            VersionConvenio::create([
-                'convenio_id'              => $c->id,
-                'numero_version'           => $next,
-                'archivo_nombre_original'  => $name,
-                'archivo_path'             => $path,
-                'fecha_version'            => now(),
-                'observaciones'            => 'Actualización',
-                'texto'                    => $texto, // <-- aquí
-                'created_at'               => now(),
+        DB::transaction(function () use ($r, $c, $data) {
+            // 1) Campos simples del convenio
+            $c->update([
+                'titulo'            => $this->toUtf8($data['titulo']),
+                'descripcion'       => $this->toUtf8($data['descripcion'] ?? null),
+                'fecha_firma'       => $data['fecha_firma'] ?? null,
+                'fecha_vencimiento' => $data['fecha_vencimiento'] ?? null,
             ]);
-        }
 
-        // Recalcular estado por fechas
-        $this->setEstadoPorFechas($c);
+            // 2) ¿Hay archivo? -> REEMPLAZAR base + v1 (no crear nueva)
+            if ($r->hasFile('archivo')) {
+                $file = $r->file('archivo');
 
-        return response()->json($c, 200, [], JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE);
+                // nombre original + nombre físico único para evitar cacheos
+                $origName = $this->toUtf8($file->getClientOriginalName());
+                $storedName = now()->format('Ymd_His') . '_' . $origName;
+                $newPath = Storage::putFileAs("convenios/{$c->id}", $file, $storedName);
+
+                // limpiar archivos anteriores si cambió la ruta
+                if (!empty($c->archivo_path) && $c->archivo_path !== $newPath) {
+                    try { Storage::delete($c->archivo_path); } catch (\Throwable $e) {}
+                }
+
+                // actualizar archivo BASE del convenio
+                $c->archivo_nombre_original = $origName;
+                $c->archivo_path = $newPath;
+
+                // pasar a NEGOCIACION si estaba en BORRADOR
+                if ($c->estado === 'BORRADOR') {
+                    $c->estado = 'NEGOCIACION';
+                }
+                $c->save();
+
+                // extraer texto del nuevo archivo (si aplica en tu proyecto)
+                $texto = $this->tryExtractText($newPath);
+
+                // 2.a) localizar v1
+                $v1 = VersionConvenio::where('convenio_id', $c->id)
+                        ->orderBy('numero_version', 'asc')
+                        ->first();
+
+                if ($v1) {
+                    // opcional: borrar archivo viejo de v1 si existía y es distinto
+                    if (!empty($v1->archivo_path) && $v1->archivo_path !== $newPath) {
+                        try { Storage::delete($v1->archivo_path); } catch (\Throwable $e) {}
+                    }
+
+                    // REEMPLAZAR v1 (no crear nueva)
+                    $v1->archivo_nombre_original = $origName;
+                    $v1->archivo_path            = $newPath;
+                    $v1->fecha_version           = now();
+                    $v1->observaciones           = $v1->observaciones ?: 'Archivo inicial';
+                    $v1->texto                   = $texto;
+                    $v1->save();
+                } else {
+                    // Caso borde: no existe v1 -> crearla COMO v1 (no v2)
+                    VersionConvenio::create([
+                        'convenio_id'             => $c->id,
+                        'numero_version'          => 1,
+                        'archivo_nombre_original' => $origName,
+                        'archivo_path'            => $newPath,
+                        'fecha_version'           => now(),
+                        'observaciones'           => 'Archivo inicial',
+                        'texto'                   => $texto,
+                        'created_at'              => now(),
+                    ]);
+                }
+            }
+
+            // 3) recalcular estado por fechas al final
+            $this->setEstadoPorFechas($c);
+        });
+
+        // devolver convenio actualizado
+        return response()->json($c->fresh(), 200, [], JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE);
     }
 
     public function destroy($id)
@@ -358,5 +394,34 @@ class ConvenioController extends Controller
             ->where('estado','!=','CERRADO')
             ->whereDate('fecha_vencimiento','<',$hoy)
             ->update(['estado'=>'VENCIDO']);
+    }
+    public function reabrir($id)
+    {
+        $c = Convenio::findOrFail($id);
+
+        if ($c->estado !== 'CERRADO') {
+            return response()->json([
+                'message' => 'Solo se puede habilitar nuevamente un convenio en estado CERRADO.'
+            ], 422);
+        }
+
+        // Al reabrir, vuelve a NEGOCIACION (aunque esté vencido por fecha; ajusta si quieres impedirlo)
+        $c->estado = 'NEGOCIACION';
+        $c->save();
+
+        return response()->json($c, 200, [], JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE);
+    }
+
+    public function patchEstado(Request $r, $id)
+    {
+        $data = $r->validate([
+            'estado' => 'required|in:BORRADOR,NEGOCIACION,CERRADO,VENCIDO',
+        ]);
+
+        $c = Convenio::findOrFail($id);
+        $c->estado = $data['estado'];
+        $c->save();
+
+        return response()->json($c, 200, [], JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE);
     }
 }
