@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Convenios",
+    "slug": "adsib-mobile",
+    "...": "...",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/adsib.jpg",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/adsib.jpg",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adsib.jpg",
+        "softwareKeyboardLayoutMode": "pan",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "favicon": "./assets/adsib.jpg"
+    }
+  }
+}
