@@ -15,8 +15,9 @@ use App\Http\Controllers\AssistantController;
 
 /* -------------------- Públicas -------------------- */
 Route::get('/ping', fn () => response()->json(['ok' => true, 'service' => 'LARAVEL10']));
-Route::post('/auth/login', [AuthController::class, 'login']);
- 
+Route::post('/auth/login',  [AuthController::class, 'login']);
+Route::post('/auth/forgot', [AuthController::class, 'forgot']);
+
 /* --------------- Protegidas (auth) --------------- */
 Route::middleware('auth:sanctum')->group(function () {
  

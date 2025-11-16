@@ -1,10 +1,3 @@
-# train.py  (backend por defecto: tfidf mejorado)
-# -----------------------------------------------
-# - Mezcla n-gramas de palabra (1-3) y carácter (3-5)
-# - Normaliza acentos (strip_accents='unicode') y minúsculas
-# - LinearSVC + CalibratedClassifierCV para probabilidades/“confianza”
-# - Parámetros ajustables por CLI
- 
 import argparse
 from pathlib import Path
 import pandas as pd
@@ -17,7 +10,6 @@ from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import classification_report
 import joblib
  
-# Opcional SBERT si eliges backend sbert
 def _maybe_import_sbert():
     from sentence_transformers import SentenceTransformer
     return SentenceTransformer
@@ -117,7 +109,6 @@ def main():
         }
  
     else:
-        # --- SBERT + LinearSVC calibrado (cuando quieras dar el salto semántico) ---
         SentenceTransformer = _maybe_import_sbert()
         embedder = SentenceTransformer(args.embedder)
         import numpy as np

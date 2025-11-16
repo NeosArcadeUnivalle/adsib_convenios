@@ -20,13 +20,14 @@ import AssistantPage from "./pages/AssistantPage";
 import UsersList from "./pages/UsersList";
 import UserCreate from "./pages/UserCreate";
 import UserEdit from "./pages/UserEdit";
+import RecoverPassword from "./pages/RecoverPassword";
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
   <BrowserRouter>
     <Routes>
       <Route path="/login" element={<Login />} />
-
+      <Route path="/recuperar-contraseña" element={<RecoverPassword />} />
       {/* Rutas protegidas por sesión */}
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>

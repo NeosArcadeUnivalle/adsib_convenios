@@ -19,12 +19,12 @@ export default function Login() {
     setErr("");
 
     if (!emailRe.test(f.email)) return setErr("Correo inválido.");
-    if (f.password.length < 8) return setErr("La contraseña debe tener al menos 8 caracteres.");
+    if (f.password.length < 8)
+      return setErr("La contraseña debe tener al menos 8 caracteres.");
 
     try {
       const { data } = await api.post("/auth/login", f);
       setToken(data.token);
-      // Marca que acabas de iniciar sesión para abrir el popup en Home
       sessionStorage.setItem("just_logged_v2", "1");
       nav("/");
     } catch (er) {
@@ -59,9 +59,24 @@ export default function Login() {
     cursor: "pointer",
   };
 
+  const linkStyle = {
+    marginTop: 10,
+    textAlign: "center",
+    fontSize: 14,
+    color: "#0d839bff",
+    cursor: "pointer",
+    textDecoration: "underline",
+  };
+
   return (
     <div style={card}>
-      <h2 style={{ marginTop: 0, textAlign: "center", fontSize: "clamp(22px, 3.2vw, 28px)" }}>
+      <h2
+        style={{
+          marginTop: 0,
+          textAlign: "center",
+          fontSize: "clamp(22px, 3.2vw, 28px)",
+        }}
+      >
         Iniciar sesión
       </h2>
 
@@ -88,7 +103,9 @@ export default function Login() {
             type="email"
             value={f.email}
             onKeyDown={onKeyDownNoSpaces}
-            onChange={(e) => setF((s) => ({ ...s, email: e.target.value.trim() }))}
+            onChange={(e) =>
+              setF((s) => ({ ...s, email: e.target.value.trim() }))
+            }
             placeholder="usuario@dominio.com"
             required
             autoComplete="username"
@@ -102,7 +119,9 @@ export default function Login() {
             type="password"
             value={f.password}
             onKeyDown={onKeyDownNoSpaces}
-            onChange={(e) => setF((s) => ({ ...s, password: e.target.value }))} 
+            onChange={(e) =>
+              setF((s) => ({ ...s, password: e.target.value }))
+            }
             minLength={8}
             placeholder="••••••••"
             required
@@ -120,6 +139,14 @@ export default function Login() {
           Ingresar
         </button>
       </form>
+
+      {/* Enlace a pantalla de recuperación */}
+      <div
+        style={linkStyle}
+        onClick={() => nav("/recuperar-contraseña")}
+      >
+        ¿Olvidaste tu contraseña?
+      </div>
     </div>
   );
 }
