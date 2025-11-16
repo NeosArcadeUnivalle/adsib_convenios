@@ -9,6 +9,7 @@ export default function Login() {
   const [f, setF] = useState({ email: "", password: "" });
   const [err, setErr] = useState("");
   const [hover, setHover] = useState(false);
+  const [showPass, setShowPass] = useState(false); // 👁️
 
   const onKeyDownNoSpaces = (e) => {
     if (e.key === " " && e.target.selectionStart === 0) e.preventDefault();
@@ -39,6 +40,7 @@ export default function Login() {
     border: "1px solid #1a6779ff",
     borderRadius: 12,
   };
+
   const errorBox = {
     background: "#b80909ff",
     color: "#ffffffff",
@@ -47,6 +49,7 @@ export default function Login() {
     borderRadius: 8,
     marginBottom: 10,
   };
+
   const btnStyle = {
     background: hover ? "#0d839bff" : "#1a6779ff",
     color: "#ffffff",
@@ -66,6 +69,53 @@ export default function Login() {
     color: "#0d839bff",
     cursor: "pointer",
     textDecoration: "underline",
+  };
+
+  // Íconos SVG
+  const eyeOpen = (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#ccc"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+
+  const eyeClosed = (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#ccc"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* mismo ojo que el abierto */}
+      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" />
+      <circle cx="12" cy="12" r="3" />
+      {/* línea diagonal para “oculto” */}
+      <path d="M3 3l18 18" />
+    </svg>
+  );
+
+  const eyeBtn = {
+    position: "absolute",
+    right: 10,
+    top: "40%",
+    transform: "translateY(-50%)",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   };
 
   return (
@@ -97,6 +147,7 @@ export default function Login() {
       {err && <div style={errorBox}>{err}</div>}
 
       <form onSubmit={submit} style={{ display: "grid", gap: 12 }}>
+        {/* EMAIL */}
         <label>
           Correo
           <input
@@ -113,21 +164,40 @@ export default function Login() {
           />
         </label>
 
+        {/* PASSWORD + OJO */}
         <label>
           Contraseña
-          <input
-            type="password"
-            value={f.password}
-            onKeyDown={onKeyDownNoSpaces}
-            onChange={(e) =>
-              setF((s) => ({ ...s, password: e.target.value }))
-            }
-            minLength={8}
-            placeholder="••••••••"
-            required
-            autoComplete="current-password"
-            style={{ width: "100%" }}
-          />
+          {/* contenedor SOLO para el input, así el ojo se centra con el campo */}
+          <div style={{ position: "relative" }}>
+            <input
+              type={showPass ? "text" : "password"}
+              value={f.password}
+              onKeyDown={onKeyDownNoSpaces}
+              onChange={(e) =>
+                setF((s) => ({ ...s, password: e.target.value }))
+              }
+              minLength={8}
+              placeholder="••••••••"
+              required
+              autoComplete="current-password"
+              style={{ width: "100%", paddingRight: 40 }}
+            />
+
+            {/* Ícono alineado al centro del input */}
+            <button
+              type="button"
+              onClick={() => setShowPass((s) => !s)}
+              style={{
+                ...eyeBtn,
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                outline: "none",
+              }}
+            >
+              {showPass ? eyeClosed : eyeOpen}
+            </button>
+          </div>
         </label>
 
         <button
@@ -140,11 +210,8 @@ export default function Login() {
         </button>
       </form>
 
-      {/* Enlace a pantalla de recuperación */}
-      <div
-        style={linkStyle}
-        onClick={() => nav("/recuperar-contraseña")}
-      >
+      {/* Recuperar contraseña */}
+      <div style={linkStyle} onClick={() => nav("/recuperar-contraseña")}>
         ¿Olvidaste tu contraseña?
       </div>
     </div>

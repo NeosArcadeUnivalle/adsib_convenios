@@ -11,7 +11,7 @@ class UsuarioController extends Controller
 {
     // GET /api/usuarios?q=...&per_page=10
     public function index(Request $r) {
-        $per = (int)($r->get('per_page', 10));
+        $per = (int)($r->get('per_page', 5));
         $per = ($per > 0 && $per <= 100) ? $per : 10;
 
         $q = Usuario::query()

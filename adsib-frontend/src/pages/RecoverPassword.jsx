@@ -86,7 +86,7 @@ export default function RecoverPassword() {
         Recuperar contraseña
       </h2>
 
-      <p style={{ fontSize: 14, color: "#4b5563", marginBottom: 12 }}>
+      <p style={{ fontSize: 14, color: "#b6a726ff", marginBottom: 12 }}>
         Ingresa tu correo registrado. Si existe en el sistema, se enviará una
         contraseña temporal a tu bandeja de entrada.
       </p>
@@ -101,7 +101,7 @@ export default function RecoverPassword() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="usuario@adsib.gob.bo"
+            placeholder="usuario@dominio.com"
             required
             style={{ width: "100%" }}
             autoComplete="email"
@@ -109,7 +109,7 @@ export default function RecoverPassword() {
         </label>
 
         <button type="submit" style={btnPrimary} disabled={loading}>
-          {loading ? "Enviando..." : "Enviar enlace / contraseña temporal"}
+          {loading ? "Enviando..." : "Enviar Contraseña Temporal"}
         </button>
       </form>
 
@@ -118,7 +118,7 @@ export default function RecoverPassword() {
         style={btnSecondary}
         onClick={() => nav("/login")}
       >
-        ← Volver al inicio de sesión
+        Regresar al Login
       </button>
     </div>
   );

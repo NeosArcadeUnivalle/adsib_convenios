@@ -103,12 +103,12 @@ main, section, article, form, fieldset {
   background:rgba(0,0,0,.22);
   padding:16px;
   border-radius:12px;
-  top: 0; left: 0; bottom: 0;
-  margin: 0 0 16px 0 !important;  /* pegado a la izquierda */
-  width: 100% !important;
-  max-width: none !important;
-  overflow-x: auto;               /* si algo es muy ancho, scroll local */
+  margin: 0 0 16px 0 !important;
+  /* importante: ya NO forzamos width 100% */
+  max-width: 100% !important;
+  overflow-x: auto;
 }
+
 .table{ width:100%; border-collapse:collapse; }
 .table th, .table td{ padding:10px; border-top:1px solid rgba(255,255,255,.08); }
 .table thead th{ border-top:none; }

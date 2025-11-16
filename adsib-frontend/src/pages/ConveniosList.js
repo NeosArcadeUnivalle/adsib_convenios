@@ -32,7 +32,7 @@ const ESTADOS = ["BORRADOR","NEGOCIACION","CERRADO","VENCIDO"];
 /* ===== Colores de botones (solo aquí) ===== */
 const BTN = {
   info:    { background:"#0ea5e9", borderColor:"#0284c7", color:"#fff" },
-  warn:    { background:"#f59e0b", borderColor:"#b45309", color:"#1f2937" },
+  warn:    { background:"#f59e0b", borderColor:"#b45309", color:"#000000ff" },
   danger:  { background:"#ef4444", borderColor:"#b91c1c", color:"#fff" },
   clean:   { background:"#1a6779", borderColor:"#125463", color:"#fff" },
   success: { background:"#1a7927ff", borderColor:"#15803d", color:"#fff" }, // Nuevo convenio

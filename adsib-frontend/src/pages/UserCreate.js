@@ -60,7 +60,7 @@ export default function UserCreate(){
   return (
     <div className="container">
       <div className="toolbar" style={{ gap: 8, marginBottom: 8 }}>
-        <Link to="/usuarios" className="btn" style={BTN.neutral}>← Volver</Link>
+        <Link to="/usuarios" className="btn" style={BTN.neutral}>Volver</Link>
       </div>
 
       <h2>Nuevo usuario</h2>

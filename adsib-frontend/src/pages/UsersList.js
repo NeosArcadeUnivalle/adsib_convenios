@@ -2,12 +2,22 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../api";
 
-const fmt = (s)=> s ? String(s).slice(0,19).replace('T',' ') : "—";
+// Formatear sólo la FECHA (YYYY-MM-DD)
+const fmt = (s) => {
+  if (!s) return "—";
+  const str = String(s);
+  // Soporta "2025-11-16T03:55:14" o "2025-11-16 03:55:14"
+  if (str.includes("T") || str.includes(" ")) {
+    return str.split(/[ T]/)[0];
+  }
+  // Si por alguna razón viene solo la fecha o algo raro
+  return str.slice(0, 10);
+};
 
 /* Paleta local para botones (consistente con otras pantallas) */
 const BTN = {
   info:     { background:"#0ea5e9", borderColor:"#0284c7", color:"#fff" },
-  warn:     { background:"#eab308", borderColor:"#a16207", color:"#1f2937" },
+  warn:     { background:"#eab308", borderColor:"#a16207", color:"#000000ff" },
   danger:   { background:"#dc2626", borderColor:"#b91c1c", color:"#fff" },
   neutral:  { background:"#374151", borderColor:"#4b5563", color:"#e5e7eb" },
   primary:  { background:"#1a7927ff", borderColor:"#14691fff", color:"#fff" },
@@ -17,30 +27,41 @@ const BTN = {
 export default function UsersList(){
   const [rows, setRows] = useState([]);
   const [meta, setMeta] = useState({ last_page: 1 });
-  const [f, setF] = useState({ q:"", page:1, per_page:10 });
+  const [f, setF] = useState({ q:"", page:1, per_page:5 }); // 👈 ahora 5 por página
 
   const qs = useMemo(()=>{
     const p = new URLSearchParams();
-    if (f.q) p.set('q', f.q);
-    p.set('page', f.page);
-    p.set('per_page', f.per_page);
+    if (f.q) p.set("q", f.q);
+    p.set("page", f.page);
+    p.set("per_page", f.per_page);
     return p.toString();
   },[f]);
 
   useEffect(()=>{
     let alive = true;
-    api.get(`/usuarios?${qs}`).then(r=>{
-      if(!alive) return;
-      setRows(r.data.data || []);
-      setMeta({ last_page: r.data.last_page || 1 });
-    }).catch(console.error);
+    api.get(`/usuarios?${qs}`)
+      .then(r=>{
+        if(!alive) return;
+        setRows(r.data.data || []);
+        setMeta({ last_page: r.data.last_page || 1 });
+      })
+      .catch(console.error);
     return ()=>{ alive=false; };
   },[qs]);
 
   const eliminar = async(id)=>{
     if(!window.confirm("¿Eliminar este usuario?")) return;
     await api.delete(`/usuarios/${id}`);
-    setRows(x=>x.filter(r=>r.id!==id));
+
+    // Después de eliminar, recargar la página actual para que el paginador
+    // y el listado queden sincronizados con el backend
+    try {
+      const { data } = await api.get(`/usuarios?${qs}`);
+      setRows(data.data || []);
+      setMeta({ last_page: data.last_page || 1 });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   return (
