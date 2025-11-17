@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Services\RiskNlp;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Carbon\Carbon;
 
 class AnalisisController extends Controller
 {
@@ -102,7 +104,6 @@ class AnalisisController extends Controller
 
             $hasOff = isset($m['start'], $m['end']) && is_numeric($m['start']) && is_numeric($m['end']) && ($m['end'] > $m['start']);
             if (!$hasOff || $tok === '') {
-                // Si no hay offsets confiables o token vacío, no arriesgamos a fusionar — lo dejamos pasar.
                 $kept[] = $m;
                 continue;
             }
@@ -110,7 +111,6 @@ class AnalisisController extends Controller
             $s1 = (int)$m['start']; $e1 = (int)$m['end'];
             $merged = false;
 
-            // buscamos en kept algún candidato para fusionar
             foreach ($kept as $idx => $prev) {
                 $tok2 = $this->normToken((string)($prev['token'] ?? ''));
                 $src2 = strtolower((string)($prev['source'] ?? ''));
@@ -119,16 +119,13 @@ class AnalisisController extends Controller
                 $hasOff2 = isset($prev['start'], $prev['end']) && is_numeric($prev['start']) && is_numeric($prev['end']) && ($prev['end'] > $prev['start']);
                 if (!$hasOff2) continue;
 
-                // misma "clase" de match
                 if ($src !== $src2 || $sev !== $sev2) continue;
-                // tokens equivalentes tras normalización (evita "precio preferen" vs "precios preferen")
                 if ($tok !== $tok2) continue;
 
                 $s2 = (int)$prev['start']; $e2 = (int)$prev['end'];
                 $over = $this->iou($s1, $e1, $s2, $e2);
 
                 if ($over >= 0.60) {
-                    // elegir el que cubra más (rango más largo). Si igual, mantenemos el anterior.
                     $len1 = $e1 - $s1;
                     $len2 = $e2 - $s2;
                     if ($len1 > $len2) {
@@ -148,24 +145,17 @@ class AnalisisController extends Controller
 
     /**
      * Filtra/depura coincidencias SEMANTIC y pondera el score final.
-     * - Elimina anticipaciones sin palabra núcleo.
-     * - Elimina anticipaciones con negación contextual.
-     * - Deduplica coincidencias solapadas (misma cláusula repetida).
-     * - Reduce fuerte el peso de lo semántico y limita su aporte global.
      */
     protected function filterAndScore(array $matches, string $fullText): array
     {
-        // 1) depurar anticipaciones
         $clean = [];
         foreach ($matches as $m) {
             $src = strtolower((string)($m['source'] ?? ''));
             if ($src === 'semantic') {
                 $token = (string)($m['token'] ?? '');
-                // descartar si no toca tema núcleo
                 if (!$this->hasRiskKeyword($token)) {
                     continue;
                 }
-                // descartar si hay negación en contexto
                 if ($this->hasNegationAround($fullText, $token)) {
                     continue;
                 }
@@ -173,15 +163,13 @@ class AnalisisController extends Controller
             $clean[] = $m;
         }
 
-        // 1.5) DEDUP por solapamiento (misma fuente+severidad+token similar, offsets que se pisan)
         $clean = $this->dedupeOverlaps($clean);
 
-        // 2) ponderación
         $W_RULE = ['HIGH'=>1.00,'MEDIUM'=>0.60,'LOW'=>0.30,'NONE'=>0.00];
         $W_SEM  = ['HIGH'=>0.15,'MEDIUM'=>0.08,'LOW'=>0.03,'NONE'=>0.00];
 
-        $CAP_SEM = 0.35; // el aporte semántico no puede pasar del 35% del aporte por reglas
-        $DENOM   = 7.0;  // endurece el score global
+        $CAP_SEM = 0.35;
+        $DENOM   = 7.0;
 
         $TH_MEDIO = 0.45;
         $TH_ALTO  = 0.80;
@@ -220,7 +208,6 @@ class AnalisisController extends Controller
 
     public function riesgo(Request $request)
     {
-        // Validación
         $text       = (string) ($request->input('text') ?? '');
         $convenioId = $request->input('convenio_id');
         $versionId  = $request->input('version_id');
@@ -229,7 +216,6 @@ class AnalisisController extends Controller
             return response()->json(['message' => 'El texto a analizar está vacío.'], 422);
         }
 
-        // Llamada al servicio NLP
         $resp = $this->nlp->analyze($text);
         if (!($resp['ok'] ?? false)) {
             return response()->json([
@@ -242,10 +228,8 @@ class AnalisisController extends Controller
         $matches = is_array($data['matches'] ?? null) ? $data['matches'] : [];
         $modelo  = (string) ($data['summary']['model_embedder'] ?? 'tfidf-pipeline');
 
-        // Depurar anticipaciones, deduplicar y recalcular score/risk
         $calc = $this->filterAndScore($matches, $text);
 
-        // Reemplazar matches por los depurados (lo que ves y lo que se guarda)
         $matchesClean = $calc['kept_matches'];
         $data['matches']    = $matchesClean;
         $data['score']      = $calc['score'];
@@ -260,7 +244,6 @@ class AnalisisController extends Controller
         try {
             DB::beginTransaction();
 
-            // 1) Cabecera
             $idAnalisis = DB::table('analisis_riesgos')->insertGetId([
                 'convenio_id'  => $convenioId,
                 'version_id'   => $versionId,
@@ -273,7 +256,6 @@ class AnalisisController extends Controller
                 'updated_at'   => now(),
             ]);
 
-            // 2) Dataset detalle (solo los que pasaron el filtro)
             if (!empty($matchesClean)) {
                 $bulk = [];
                 foreach ($matchesClean as $m) {
@@ -298,7 +280,6 @@ class AnalisisController extends Controller
                 DB::table('riesgo_dataset')->insert($bulk);
             }
 
-            // 3) Notificación
             if (in_array($riskLevel, ['ALTO', 'MEDIO'], true) && $convenioId) {
                 $tipo    = $riskLevel === 'ALTO' ? 'ALTO_RIESGO' : 'MEDIO_RIESGO';
                 $mensaje = $riskLevel === 'ALTO'
@@ -370,12 +351,11 @@ class AnalisisController extends Controller
 
         $total = (clone $query)->count();
 
-        // Traemos y convertimos fechas a ISO-8601 con zona horaria explícita
         $rawItems = $query->forPage($page, $perPage)->get();
         $items = $rawItems->map(function ($r) {
-            $r->analizado_en = \Carbon\Carbon::parse($r->analizado_en)->toIso8601String();
-            $r->created_at   = \Carbon\Carbon::parse($r->created_at)->toIso8601String();
-            $r->updated_at   = \Carbon\Carbon::parse($r->updated_at)->toIso8601String();
+            $r->analizado_en = Carbon::parse($r->analizado_en)->toIso8601String();
+            $r->created_at   = Carbon::parse($r->created_at)->toIso8601String();
+            $r->updated_at   = Carbon::parse($r->updated_at)->toIso8601String();
             return $r;
         });
 
@@ -388,5 +368,141 @@ class AnalisisController extends Controller
                 'hasMore' => ($page * $perPage) < $total,
             ],
         ]);
+    }
+
+    /**
+     * Exporta un análisis en PDF (descarga directa, sin abrir vista).
+     */
+    public function pdf(int $id)
+    {
+        try {
+            $analysis = DB::table('analisis_riesgos')->where('id', $id)->first();
+
+            if (!$analysis) {
+                return response()->json(['message' => 'Análisis no encontrado'], 404);
+            }
+
+            $convenio = DB::table('convenios')->where('id', $analysis->convenio_id)->first();
+
+            $tituloConvenio = $convenio->titulo ?? ('Convenio #' . $analysis->convenio_id);
+            $codigo         = $analysis->id;
+            $fecha          = $analysis->analizado_en
+                ? Carbon::parse($analysis->analizado_en)->format('d/m/Y H:i')
+                : '—';
+            $nivel          = strtoupper($analysis->risk_level ?? '—');
+            $confianza      = number_format(max(0, min(1, (float)$analysis->score)) * 100, 0) . '%';
+            $modelo         = $analysis->modelo ?? 'Desconocido';
+            $hallazgos      = $analysis->matches ?? 0;
+
+            $safe = fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+
+            $html = '
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Análisis de riesgo convenio ' . $safe($tituloConvenio) . '</title>
+    <style>
+        body { font-family: DejaVu Sans, sans-serif; font-size: 12px; color: #111827; }
+        h1 { font-size: 18px; margin-bottom: 4px; }
+        h2 { font-size: 14px; margin-top: 16px; margin-bottom: 6px; }
+        .small { font-size: 11px; color: #4b5563; }
+        .box { border: 1px solid #d1d5db; border-radius: 4px; padding: 8px; margin-top: 6px; }
+        .row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        .label { font-weight: bold; }
+        .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; font-weight: bold; }
+        .pill-alto { background: #b91c1c; color: #fff; }
+        .pill-medio { background: #92400e; color: #fff; }
+        .pill-bajo { background: #065f46; color: #fff; }
+        .pill-otro { background: #4b5563; color: #fff; }
+        .mt-2 { margin-top: 8px; }
+        .mt-3 { margin-top: 12px; }
+        .mb-0 { margin-bottom: 0; }
+        .text-right { text-align: right; }
+        .muted { color: #6b7280; font-size: 11px; }
+        hr { border: none; border-top: 1px solid #e5e7eb; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Análisis de riesgo del convenio</h1>
+    <div class="small">Generado automáticamente por el módulo de análisis de riesgos.</div>
+
+    <div class="box mt-2">
+        <div class="row">
+            <div><span class="label">Convenio:</span> ' . $safe($tituloConvenio) . '</div>
+            <div class="small">ID análisis: ' . $safe($codigo) . '</div>
+        </div>
+        <div class="row">
+            <div><span class="label">Fecha de análisis:</span> ' . $safe($fecha) . '</div>
+            <div><span class="label">Modelo:</span> ' . $safe($modelo) . '</div>
+        </div>
+    </div>
+
+    <h2>Resultado global</h2>
+    <div class="box">
+        <div class="row">
+            <div>
+                <span class="label">Nivel de riesgo:</span>
+                ' . $this->renderRiskPill($nivel) . '
+            </div>
+            <div class="text-right">
+                <span class="label">Confianza del modelo:</span>
+                ' . $safe($confianza) . '
+            </div>
+        </div>
+        <div class="mt-2">
+            <span class="label">Hallazgos registrados:</span> ' . $safe($hallazgos) . '
+        </div>
+    </div>
+
+    <h2>Notas</h2>
+    <div class="box">
+        <p class="mb-0">
+            Este documento resume el resultado del análisis automático de riesgo sobre el texto del convenio.
+            Se recomienda revisar las cláusulas señaladas en el sistema para un análisis jurídico detallado.
+        </p>
+    </div>
+
+    <hr>
+
+    <div class="muted">
+        ADSIB — Sistema de Gestión de Convenios · Análisis de riesgos automatizado.
+    </div>
+</body>
+</html>';
+
+            $pdf = Pdf::loadHTML($html)->setPaper('A4', 'portrait');
+            $fileName = 'analisis_riesgo_' . $analysis->id . '.pdf';
+
+            return $pdf->download($fileName);
+
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Error generando el PDF del análisis',
+                'detail'  => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Renderiza un span con estilo según nivel de riesgo.
+     */
+    protected function renderRiskPill(string $nivel): string
+    {
+        $n = strtoupper(trim($nivel));
+        $class = 'pill-otro';
+        switch ($n) {
+            case 'ALTO':
+                $class = 'pill-alto';
+                break;
+            case 'MEDIO':
+                $class = 'pill-medio';
+                break;
+            case 'BAJO':
+                $class = 'pill-bajo';
+                break;
+        }
+        $safe = htmlspecialchars($n, ENT_QUOTES, 'UTF-8');
+        return '<span class="pill ' . $class . '">' . $safe . '</span>';
     }
 }

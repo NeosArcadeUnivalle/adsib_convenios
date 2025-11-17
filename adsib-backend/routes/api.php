@@ -70,6 +70,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/analisis/riesgo',  [AnalisisController::class, 'riesgo']); // ejecutar análisis
     Route::get ('/analisis',         [AnalisisController::class, 'index']);  // historial por versión
     Route::get ('/analisis/dataset', [RiesgosController::class, 'dataset']); // dataset por versión
+    Route::get('/analisis/{id}/pdf', [AnalisisController::class, 'pdf'])->whereNumber('id');
 
     /* Asistente Virtual */
     Route::post('assistant/chat', [AssistantController::class, 'chat']);
