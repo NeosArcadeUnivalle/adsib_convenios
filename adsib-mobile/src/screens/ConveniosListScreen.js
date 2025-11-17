@@ -1,3 +1,4 @@
+// ConveniosListScreen.js
 import React, { useEffect, useState, useContext } from "react";
 import { View, Text, TextInput, FlatList, Pressable } from "react-native";
 import { get } from "../api";
@@ -39,7 +40,9 @@ export default function ConveniosListScreen({ navigation }) {
 
   const renderItem = ({ item }) => (
     <Pressable
-      onPress={() => navigation.navigate("Detalle", { id: item.id, title: item.titulo })}
+      onPress={() =>
+        navigation.navigate("Detalle", { id: item.id, title: item.titulo })
+      }
       style={({ pressed }) => ({
         backgroundColor: "#12151b",
         borderColor: "#1f2937",
@@ -50,10 +53,16 @@ export default function ConveniosListScreen({ navigation }) {
         transform: [{ scale: pressed ? 0.99 : 1 }],
       })}
     >
-      <Text style={{ color: "#f1f5f9", fontWeight: "800", fontSize: 16 }} numberOfLines={2}>
+      <Text
+        style={{ color: "#f1f5f9", fontWeight: "800", fontSize: 16 }}
+        numberOfLines={2}
+      >
         {item.titulo}
       </Text>
-      <Text style={{ color: "#9ca3af", marginTop: 4 }} numberOfLines={2}>
+      <Text
+        style={{ color: "#9ca3af", marginTop: 4 }}
+        numberOfLines={2}
+      >
         {item.descripcion || "—"}
       </Text>
       <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
@@ -64,6 +73,41 @@ export default function ConveniosListScreen({ navigation }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#0b0c0f", padding: 16 }}>
+      {/* Header con botón a Notificaciones */}
+      <View
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 12,
+        }}
+      >
+        <Text style={{ color: "#e5e7eb", fontSize: 20, fontWeight: "800" }}>
+          Convenios
+        </Text>
+
+        <Pressable
+          onPress={() => navigation.navigate("Notificaciones")}
+          style={({ pressed }) => ({
+            backgroundColor: "#1d4ed8",
+            paddingHorizontal: 12,
+            paddingVertical: 6,
+            borderRadius: 999,
+            opacity: pressed ? 0.8 : 1,
+          })}
+        >
+          <Text
+            style={{
+              color: "#f9fafb",
+              fontWeight: "700",
+              fontSize: 13,
+            }}
+          >
+            Ver notificaciones
+          </Text>
+        </Pressable>
+      </View>
+
       <TextInput
         placeholder="Buscar por nombre de convenio…"
         placeholderTextColor="#6b7280"
@@ -72,7 +116,10 @@ export default function ConveniosListScreen({ navigation }) {
           borderColor: "#1f2937",
           borderWidth: 1,
           color: "#e5e7eb",
-          paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, marginBottom: 12,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          borderRadius: 10,
+          marginBottom: 12,
         }}
         value={q}
         onChangeText={setQ}
@@ -88,7 +135,9 @@ export default function ConveniosListScreen({ navigation }) {
           keyExtractor={(it) => String(it.id)}
           renderItem={renderItem}
           contentContainerStyle={{ paddingBottom: 16 }}
-          ListEmptyComponent={<Text style={{ color: "#9ca3af" }}>Sin resultados</Text>}
+          ListEmptyComponent={
+            <Text style={{ color: "#9ca3af" }}>Sin resultados</Text>
+          }
         />
       )}
     </View>
@@ -96,9 +145,21 @@ export default function ConveniosListScreen({ navigation }) {
 }
 
 function Chip({ text }) {
-  const color = text === "CERRADO" ? "#10b981" : text === "VENCIDO" ? "#ef4444" : "#f59e0b";
+  const color =
+    text === "CERRADO"
+      ? "#10b981"
+      : text === "VENCIDO"
+      ? "#ef4444"
+      : "#f59e0b";
   return (
-    <View style={{ backgroundColor: color, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 }}>
+    <View
+      style={{
+        backgroundColor: color,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 999,
+      }}
+    >
       <Text style={{ color: "#0b1220", fontWeight: "900" }}>{text}</Text>
     </View>
   );

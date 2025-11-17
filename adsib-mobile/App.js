@@ -8,6 +8,7 @@ import { AuthProvider, AuthCtx } from "./src/auth";
 import LoginScreen from "./src/screens/LoginScreen";
 import ConveniosListScreen from "./src/screens/ConveniosListScreen";
 import ConvenioDetailScreen from "./src/screens/ConvenioDetailScreen";
+import NotificationsScreen from "./src/screens/NotificationsScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -43,7 +44,7 @@ function AppStack() {
         headerTitleStyle: { fontWeight: "900" },
       }}
     >
-      {/* Lista: logo a la izquierda + Logout a la derecha */}
+      {/* Lista de convenios */}
       <Stack.Screen
         name="Convenios"
         component={ConveniosListScreen}
@@ -59,12 +60,23 @@ function AppStack() {
         }}
       />
 
-      {/* Detalle: dejar headerLeft por defecto (flecha back) + Logout a la derecha */}
+      {/* Detalle de convenio (flecha back nativa + Logout) */}
       <Stack.Screen
         name="Detalle"
         component={ConvenioDetailScreen}
         options={{
           title: "Detalle",
+          headerRight: () => <LogoutButton />,
+          headerBackTitleVisible: false,
+        }}
+      />
+
+      {/* Notificaciones (flecha back nativa + Logout) */}
+      <Stack.Screen
+        name="Notificaciones"
+        component={NotificationsScreen}
+        options={{
+          title: "Notificaciones",
           headerRight: () => <LogoutButton />,
           headerBackTitleVisible: false,
         }}
@@ -88,7 +100,7 @@ function AuthStack() {
 
 function RootNav() {
   const { user, ready } = useContext(AuthCtx);
-  if (!ready) return null; // pequeño splash
+  if (!ready) return null; // pequeño splash mientras carga el estado
   return user ? <AppStack /> : <AuthStack />;
 }
 
