@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 import numpy as np
 import re
 
@@ -12,6 +12,27 @@ def clean_text(s: str) -> str:
     s = s.replace("\r", " ").replace("\n", " ")
     s = re.sub(r"\s+", " ", s).strip()
     return s
+
+
+def clean_ocr_text(s: str) -> str:
+    """
+    Limpieza fuerte para texto proveniente de imágenes / OCR:
+    - Elimina entidades HTML (&quot;, &#8203;, &nbsp;, etc.)
+    - Elimina caracteres de control / invisibles
+    - Elimina bloques numéricos largos (códigos de OCR)
+    - Normaliza espacios
+    """
+    if not s:
+        return ""
+    s = re.sub(r"&#\d+;?", " ", s)              # entidades numéricas &#8203;
+    s = re.sub(r"&[A-Za-z0-9#]+;", " ", s)      # entidades &quot; &nbsp; ...
+    s = re.sub(r"[\x00-\x1F\x7F\xAD]", " ", s)  # caracteres de control
+
+    # 🔥 elimina bloques numéricos largos (6+ dígitos)
+    s = re.sub(r"\b\d{6,}\b", " ", s)
+
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
 
 
 class SemanticIndexer:
@@ -40,9 +61,13 @@ class SemanticIndexer:
         """
         if not items:
             return 0
+
         # limpiar texto
         for it in items:
-            it["fragmento"] = clean_text(str(it.get("fragmento", "")))
+            raw = str(it.get("fragmento", ""))
+            raw = clean_text(raw)
+            raw = clean_ocr_text(raw)
+            it["fragmento"] = raw
 
         texts = [it["fragmento"] for it in items]
         vecs = self._embed(texts)  # (k, d)
@@ -73,7 +98,7 @@ class SemanticIndexer:
 
         # caso: "convenio con AGETIC" / "mi convenio con BoA"
         m = re.search(r'(?:convenio\s+con|con)\s+"?([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9\.\-& ]+)"?', q, flags=re.IGNORECASE)
-        extra = []
+        extra: List[str] = []
         if m:
             extra.append(m.group(1).strip())
 

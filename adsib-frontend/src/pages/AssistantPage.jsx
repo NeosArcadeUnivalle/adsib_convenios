@@ -70,7 +70,8 @@ export default function AssistantPage() {
     {
       role: "assistant",
       text:
-        "¡Hola! Soy tu asistente de convenios. Pregúntame cualquier cosa sobre vencimientos, riesgos, versiones, comparaciones o historial.",
+        "¡Hola! 👋 Soy tu asistente virtual de convenios. Puedo ayudarte con fechas de firma y vencimiento, riesgos, versiones, comparaciones, notificaciones y detalles de cualquier convenio que tengas en el sistema.\n\n" +
+        "Si quieres, empieza preguntando algo como: «¿Cuál es la fecha de vencimiento del convenio <<nombre del convenio>>?»",
     },
   ]);
   const [input, setInput] = useState("");
@@ -220,30 +221,77 @@ export default function AssistantPage() {
                 <section style={styles.guideCol}>
                   <h3 style={styles.guideTitle}>Ejemplos útiles</h3>
                   <ul style={styles.guideList}>
-                    <li>¿Cuál es la <strong style={styles.strong}>fecha de vencimiento</strong> del convenio con <em>BoA</em>?</li>
-                    <li>¿Qué convenios <strong style={styles.strong}>vencen este año</strong>?</li>
-                    <li>Muéstrame los convenios <strong style={styles.strong}>firmados este año</strong>.</li>
-                    <li>Convenios <strong style={styles.strong}>ordenados por vencimiento</strong>.</li>
-                    <li>¿Qué convenios están en estado <strong style={styles.strong}>NEGOCIACION</strong>?</li>
-                    <li>¿Qué convenios vencen en los <strong style={styles.strong}>próximos 15 días</strong>?</li>
-                    <li>¿Cuántas <strong style={styles.strong}>versiones</strong> tiene mi convenio con <em>Ministerio de Salud</em>?</li>
-                    <li>¿Cuáles son las <strong style={styles.strong}>observaciones</strong> de la <strong style={styles.strong}>v1</strong> de <em>AGETIC</em>?</li>
-                    <li>Dime las <strong style={styles.strong}>cláusulas detectadas</strong> en el último <strong style={styles.strong}>análisis de riesgo</strong> de <em>BoA</em>.</li>
-                    <li>Quiero los <strong style={styles.strong}>detalles</strong> del convenio <em>UMSS</em>.</li>
-                    <li>¿Cuál es la <strong style={styles.strong}>descripción</strong> de mi convenio <em>UPB</em>?</li>
-                    <li>¿Quién es el <strong style={styles.strong}>contacto/responsable</strong> de <em>AGETIC</em>?</li>
-                    <li>¿Cuáles son mis <strong style={styles.strong}>notificaciones</strong> más recientes?</li>
+                    <li>
+                      ¿Cuál es la <strong style={styles.strong}>fecha de vencimiento</strong> del convenio
+                      {" "}
+                      <code style={styles.code}>&lt;&lt;nombre del convenio&gt;&gt;</code>?
+                    </li>
+                    <li>
+                      ¿Qué convenios <strong style={styles.strong}>vencen este año</strong>?
+                    </li>
+                    <li>
+                      Muéstrame los convenios <strong style={styles.strong}>firmados en el año</strong>{" "}
+                      <code style={styles.code}>&lt;&lt;año&gt;&gt;</code>.
+                    </li>
+                    <li>
+                      Convenios <strong style={styles.strong}>ordenados por fecha de vencimiento</strong>.
+                    </li>
+                    <li>
+                      ¿Qué convenios están en estado{" "}
+                      <code style={styles.code}>&lt;&lt;ESTADO&gt;&gt;</code>?
+                      {" "}
+                      (por ejemplo: <code style={styles.code}>VIGENTE</code>, <code style={styles.code}>NEGOCIACION</code>, <code style={styles.code}>VENCIDO</code>).
+                    </li>
+                    <li>
+                      ¿Qué convenios vencen en los{" "}
+                      <code style={styles.code}>&lt;&lt;número de días&gt;&gt;</code>{" "}
+                      próximos?
+                    </li>
+                    <li>
+                      ¿Cuántas <strong style={styles.strong}>versiones</strong> tiene el convenio{" "}
+                      <code style={styles.code}>&lt;&lt;nombre del convenio&gt;&gt;</code>?
+                    </li>
+                    <li>
+                      Muéstrame las <strong style={styles.strong}>observaciones</strong> de la{" "}
+                      <strong style={styles.strong}>versión</strong>{" "}
+                      <code style={styles.code}>&lt;&lt;número de versión&gt;&gt;</code>{" "}
+                      del convenio{" "}
+                      <code style={styles.code}>&lt;&lt;nombre del convenio&gt;&gt;</code>.
+                    </li>
+                    <li>
+                      Dame las <strong style={styles.strong}>cláusulas o hallazgos</strong> del último{" "}
+                      <strong style={styles.strong}>análisis de riesgo</strong> del convenio{" "}
+                      <code style={styles.code}>&lt;&lt;nombre del convenio&gt;&gt;</code>.
+                    </li>
+                    <li>
+                      Quiero los <strong style={styles.strong}>detalles completos</strong> del convenio{" "}
+                      <code style={styles.code}>&lt;&lt;nombre del convenio&gt;&gt;</code>.
+                    </li>
+                    <li>
+                      ¿Cuál es la <strong style={styles.strong}>descripción</strong> del convenio{" "}
+                      <code style={styles.code}>&lt;&lt;nombre del convenio&gt;&gt;</code>?
+                    </li>
+                    <li>
+                      ¿Quién es el <strong style={styles.strong}>contacto o responsable</strong> del convenio{" "}
+                      <code style={styles.code}>&lt;&lt;nombre del convenio&gt;&gt;</code>?
+                    </li>
+                    <li>
+                      ¿Cuáles son mis <strong style={styles.strong}>notificaciones</strong> más recientes?
+                    </li>
                   </ul>
                 </section>
               </div>
               <div style={styles.tipRow}>
                 <span style={styles.tipBadge}>Sugerencia</span>
-                <span>
-                  Si el nombre es largo, puedes escribirlo entre comillas:{" "}
-                  <code style={styles.code}>"Ministerio de Salud y Deportes"</code>.  
-                  También puedes usar abreviaturas: <code style={styles.code}>MSD</code>,{" "}
-                  <code style={styles.code}>AGETIC</code>, <code style={styles.code}>BoA</code>.
-                </span>
+                  <span>
+                    Si el nombre es largo, puedes escribirlo entre comillas, por ejemplo:
+                    {" "}
+                    <code style={styles.code}>"&lt;&lt;nombre del convenio&gt;&gt;"</code>.
+                    {" "}
+                    Si además el convenio tiene una sigla, también puedes usarla en la pregunta
+                    (por ejemplo: <code style={styles.code}>&lt;&lt;SIGLA&gt;&gt;</code>).  
+                    El asistente intentará relacionar automáticamente ambos.
+                  </span>
               </div>
             </div>
           )}

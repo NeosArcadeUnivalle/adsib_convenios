@@ -47,6 +47,67 @@ class AssistantController extends Controller
         $this->semanticBase  = rtrim(env('SEMANTIC_BASE', 'http://127.0.0.1:8010'), '/');
     }
 
+    /* ================== LIMPIEZA DE TEXTO FUERTE ================== */
+    private function cleanTextHard(string $s): string
+    {
+        // elimina caracteres de control / invisibles
+        $s = preg_replace('/[\x00-\x1F\x7F\xAD]/u', ' ', $s);
+
+        // elimina entidades HTML numéricas tipo &#12345;
+        $s = preg_replace('/&#\d+;?/u', ' ', $s);
+
+        // elimina entidades tipo &nbsp; &quot; &amp; etc.
+        $s = preg_replace('/&[A-Za-z0-9#]+;/', ' ', $s);
+
+        // ejemplo: 1129283224902, 000000123456, etc.
+        $s = preg_replace('/\b\d{6,}\b/u', ' ', $s);
+
+        // normaliza saltos / espacios
+        $s = str_replace(["\r", "\n", "\t"], ' ', $s);
+        $s = preg_replace('/\s+/u', ' ', $s);
+
+        return trim($s);
+    }
+
+    private function cleanReply(string $s): string
+    {
+        // Mantener saltos de línea, pero limpiar basura
+
+        // 1) quitar caracteres de control (excepto \n y \r)
+        $s = preg_replace('/[\x00-\x09\x0B-\x0C\x0E-\x1F\x7F\xAD]/u', ' ', $s);
+
+        // 2) quitar entidades HTML numéricas y simbólicas: &#8203; &nbsp; &quot; etc.
+        $s = preg_replace('/&#\d+;?/u', ' ', $s);
+        $s = preg_replace('/&[A-Za-z0-9#]+;/', ' ', $s);
+
+        // 3) quitar bloques numéricos largos tipo 1129283224902 (códigos de OCR)
+        $s = preg_replace('/\b\d{6,}\b/u', ' ', $s);
+
+        // 4) normalizar espacios dentro de cada línea
+        $s = str_replace("\r\n", "\n", $s);           // normalizar saltos Windows
+        $lines = explode("\n", $s);
+        foreach ($lines as &$line) {
+            $line = preg_replace('/[ \t]+/u', ' ', $line);
+            $line = trim($line);
+        }
+        unset($line);
+
+        // 5) reconstruir, evitando más de 2 saltos seguidos
+        $s = implode("\n", array_filter($lines, fn($l) => $l !== ''));
+        $s = preg_replace('/\n{3,}/u', "\n\n", $s);
+
+        return trim($s);
+    }
+
+    /* Fallback genérico cuando no hay respuesta clara */
+    private function fallback(string $msg = "No tengo una respuesta exacta para esa consulta."): array
+    {
+        return [
+            'reply' => $msg . " Si quieres, puedo mostrarte información relacionada o decirte qué dato necesito para ayudarte mejor.",
+            'grounding' => ['type' => 'fallback'],
+        ];
+    }
+
     /* =========================================================
      *  POST /api/assistant/chat  { message, context? }
      * =======================================================*/
@@ -64,27 +125,44 @@ class AssistantController extends Controller
 
         // Guard: solo convenios
         if (!$this->isAboutConvenios($msg)) {
-            return response()->json([
-                'reply' => 'Solo puedo ayudarte con consultas sobre convenios (títulos, versiones, fechas de firma/vencimiento, riesgo, notificaciones, responsables, descripciones). Reformula tu pregunta indicando el convenio o el dato que necesitas.',
-                'grounding' => ['type' => 'guard']
-            ]);
+            $fb = $this->fallback(
+                "Solo puedo ayudarte con consultas sobre convenios (títulos, versiones, fechas de firma/vencimiento, riesgo, notificaciones, responsables, descripciones)."
+            );
+            $fb['grounding']['type'] = 'guard';
+            return response()->json($fb, 200, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
         }
 
+        // Intents directos (respuestas por SQL)
         if ($direct = $this->tryDirectAnswers($msg, $context)) {
+            $direct['reply'] = $this->cleanReply($direct['reply'] ?? '');
+
+            if ($direct['reply'] === '' || mb_strlen($direct['reply'], 'UTF-8') < 4) {
+                $direct = $this->fallback();
+            }
+
             return response()->json($direct, 200, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
         }
 
+        // RAG + LLM
         $ground = $this->buildGrounding($msg);
 
         try {
-            $reply = $this->askOllama($msg, $ground['context_text']);
-            return response()->json(['reply' => $reply, 'grounding' => $ground], 200, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+            $reply = $this->askOllama($msg, $ground['context_text'] ?? '');
+            $reply = $this->cleanReply($reply);
+
+            if ($reply === '' || mb_strlen($reply, 'UTF-8') < 4) {
+                $reply = "No tengo una respuesta exacta para esa consulta, pero si quieres puedo mostrarte información relacionada o decirte qué dato necesito para ayudarte mejor.";
+            }
+
+            return response()->json([
+                'reply'     => $reply,
+                'grounding' => $ground,
+            ], 200, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
         } catch (\Throwable $e) {
             Log::error('assistant_ollama_error', ['e' => $e->getMessage()]);
-            return response()->json([
-                'reply' => 'Ocurrió un problema al consultar la IA. Intenta nuevamente.',
-                'grounding' => $ground
-            ], 500);
+            $fb = $this->fallback("Ocurrió un problema al consultar la IA.");
+            $fb['grounding'] = $ground;
+            return response()->json($fb, 500);
         }
     }
 
@@ -101,7 +179,9 @@ class AssistantController extends Controller
             'detalle','detalles','descripción','descripcion','responsable','contacto',
             'comparación','comparacion','historial','archivo inicial','archivo final'
         ];
-        foreach ($keys as $k) if (Str::contains($t, $k)) return true;
+        foreach ($keys as $k) {
+            if (Str::contains($t, $k)) return true;
+        }
         if (preg_match('/["“”\'‘’].+["“”\'‘’]/u', $msg)) return true;
         return false;
     }
@@ -132,7 +212,9 @@ class AssistantController extends Controller
         if (preg_match('/\bconvenios\b.*\bestado\b.*\b(cerrado|negociacion|borrador|vencido)\b/u', $t, $m)) {
             return $this->answerPorEstado(Str::upper($m[1]));
         }
-        if (preg_match('/\b(próximos|proximos)\b.*\b(vencer|vencen)\b.*\b(\d+)\b/u', $t, $m)) return $this->answerProximosNDias((int)$m[2]);
+        if (preg_match('/\b(próximos|proximos)\b.*\b(vencer|vencen)\b.*\b(\d+)\b/u', $t, $m)) {
+            return $this->answerProximosNDias((int)$m[2]);
+        }
         if (preg_match('/\b(m[aá]s\s+pr[oó]ximo)\b.*\b(vencer|vencimiento)\b/u', $t)) return $this->answerMasProximo();
 
         // RIESGO nivel
@@ -148,7 +230,9 @@ class AssistantController extends Controller
 
         // Convenios con UNA versión
         if (preg_match('/\b(convenios?).*s[oó]lo.*una\s+versi[oó]n\b/u', $t) ||
-            preg_match('/\b(convenios?).*(una\s+versi[oó]n)\b/u', $t)) return $this->answerConveniosUnaVersion();
+            preg_match('/\b(convenios?).*(una\s+versi[oó]n)\b/u', $t)) {
+            return $this->answerConveniosUnaVersion();
+        }
 
         // ¿Cuántas versiones tiene X?
         if (preg_match('/\b(cu[aá]ntas?|cuantas?)\b.*\bversion(es)?\b/u', $t)) {
@@ -395,9 +479,13 @@ class AssistantController extends Controller
     private function answerFechaVencimientoPorTitulo(string $needle): array
     {
         $c = $this->fuzzyFindConvenio($needle);
-        if (!$c) return ['reply'=>"No encontré un convenio cuyo título se parezca a «{$this->sanitizeName($needle)}».",'grounding'=>['type'=>'query','total'=>0]];
+        if (!$c) return $this->fallback("No pude identificar el convenio «{$this->sanitizeName($needle)}».");
+
         $fmt = fn($d)=> $d ? Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY') : '—';
-        return ['reply'=>"El convenio **{$c->titulo}** vence el **".$fmt($c->fecha_vencimiento)."** ({$c->estado}).",'grounding'=>['type'=>'convenio','id'=>$c->id]];
+        return [
+            'reply' => "El convenio **{$c->titulo}** vence el **".$fmt($c->fecha_vencimiento)."** ({$c->estado}).",
+            'grounding'=>['type'=>'convenio','id'=>$c->id]
+        ];
     }
 
     private function answerVencenEsteAnio(): array
@@ -409,10 +497,13 @@ class AssistantController extends Controller
             ->orderBy('fecha_vencimiento')
             ->get();
 
-        if ($rows->isEmpty()) return ['reply'=>"No hay convenios que venzan en **{$y}**.",'grounding'=>['type'=>'query','total'=>0]];
+        if ($rows->isEmpty()) return $this->fallback("No hay convenios que venzan en {$y}.");
+
         $fmt = fn($d)=> Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY');
         $txt = "Convenios que vencen en **{$y}**:\n";
-        foreach ($rows as $r) $txt .= "• {$r->titulo} — ".$fmt($r->fecha_vencimiento)." ({$r->estado})\n";
+        foreach ($rows as $r) {
+            $txt .= "• {$r->titulo} — ".$fmt($r->fecha_vencimiento)." ({$r->estado})\n";
+        }
         return ['reply'=>$txt,'grounding'=>['type'=>'query','total'=>count($rows)]];
     }
 
@@ -425,10 +516,13 @@ class AssistantController extends Controller
             ->orderBy('fecha_firma')
             ->get();
 
-        if ($rows->isEmpty()) return ['reply'=>"No hay convenios firmados en **{$y}**.",'grounding'=>['type'=>'query','total'=>0]];
+        if ($rows->isEmpty()) return $this->fallback("No hay convenios firmados en {$y}.");
+
         $fmt = fn($d)=> Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY');
         $txt = "Convenios firmados en **{$y}**:\n";
-        foreach ($rows as $r) $txt .= "• {$r->titulo} — Firma: ".$fmt($r->fecha_firma)." — Vence: ".$fmt($r->fecha_vencimiento)." ({$r->estado})\n";
+        foreach ($rows as $r) {
+            $txt .= "• {$r->titulo} — Firma: ".$fmt($r->fecha_firma)." — Vence: ".$fmt($r->fecha_vencimiento)." ({$r->estado})\n";
+        }
         return ['reply'=>$txt,'grounding'=>['type'=>'query','total'=>count($rows)]];
     }
 
@@ -438,7 +532,7 @@ class AssistantController extends Controller
             ->select('id','titulo','estado','fecha_firma','fecha_vencimiento')
             ->orderBy('titulo')->get();
 
-        if ($rows->isEmpty()) return ['reply'=>'No hay convenios registrados.','grounding'=>['type'=>'query','total'=>0]];
+        if ($rows->isEmpty()) return $this->fallback("No hay convenios registrados.");
 
         $fmt = fn($d)=>$d ? Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY') : '—';
         $txt = "Listado de convenios (alfabético):\n";
@@ -452,7 +546,7 @@ class AssistantController extends Controller
     {
         $rows = DB::table('convenios')->select('titulo','estado','fecha_firma','fecha_vencimiento')
             ->orderBy('fecha_vencimiento')->get();
-        if ($rows->isEmpty()) return ['reply'=>'No hay datos.','grounding'=>['type'=>'query','total'=>0]];
+        if ($rows->isEmpty()) return $this->fallback("No hay datos de vencimiento.");
 
         $fmt = fn($d)=>$d ? Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY') : '—';
         $txt = "Convenios ordenados por fecha de vencimiento (ascendente):\n";
@@ -466,7 +560,7 @@ class AssistantController extends Controller
     {
         $rows = DB::table('convenios')->select('titulo','estado','fecha_firma','fecha_vencimiento')
             ->orderBy('fecha_firma')->get();
-        if ($rows->isEmpty()) return ['reply'=>'No hay datos.','grounding'=>['type'=>'query','total'=>0]];
+        if ($rows->isEmpty()) return $this->fallback("No hay datos de firma.");
 
         $fmt = fn($d)=>$d ? Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY') : '—';
         $txt = "Convenios ordenados por fecha de firma (ascendente):\n";
@@ -480,11 +574,13 @@ class AssistantController extends Controller
     {
         $rows = DB::table('convenios')->select('titulo','fecha_vencimiento','estado')
             ->where('estado',$estado)->orderBy('titulo')->get();
-        if ($rows->isEmpty()) return ['reply'=>"No hay convenios en estado {$estado}.",'grounding'=>['type'=>'query','total'=>0]];
+        if ($rows->isEmpty()) return $this->fallback("No hay convenios en estado {$estado}.");
 
         $fmt = fn($d)=>$d ? Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY') : '—';
         $txt = "Convenios en estado {$estado}:\n";
-        foreach ($rows as $r) $txt .= "• {$r->titulo} — Vence: ".$fmt($r->fecha_vencimiento)."\n";
+        foreach ($rows as $r) {
+            $txt .= "• {$r->titulo} — Vence: ".$fmt($r->fecha_vencimiento)."\n";
+        }
         return ['reply'=>$txt,'grounding'=>['type'=>'query','total'=>count($rows)]];
     }
 
@@ -495,11 +591,13 @@ class AssistantController extends Controller
         $rows = DB::table('convenios')->select('titulo','estado','fecha_vencimiento')
             ->whereBetween(DB::raw('DATE(fecha_vencimiento)'), [$ini,$fin])
             ->orderBy('fecha_vencimiento')->get();
-        if ($rows->isEmpty()) return ['reply'=>"No hay convenios por vencer en ≤ {$dias} días.",'grounding'=>['type'=>'query','total'=>0]];
+        if ($rows->isEmpty()) return $this->fallback("No hay convenios por vencer en ≤ {$dias} días.");
 
         $fmt = fn($d)=>Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY');
         $txt = "Convenios que vencen en ≤ {$dias} días:\n";
-        foreach ($rows as $r) $txt .= "• {$r->titulo} — ".$fmt($r->fecha_vencimiento)." ({$r->estado})\n";
+        foreach ($rows as $r) {
+            $txt .= "• {$r->titulo} — ".$fmt($r->fecha_vencimiento)." ({$r->estado})\n";
+        }
         return ['reply'=>$txt,'grounding'=>['type'=>'query','total'=>count($rows)]];
     }
 
@@ -508,10 +606,13 @@ class AssistantController extends Controller
         $hoy = now()->toDateString();
         $r = DB::table('convenios')->select('titulo','estado','fecha_vencimiento')
             ->whereDate('fecha_vencimiento','>=',$hoy)->orderBy('fecha_vencimiento')->first();
-        if (!$r) return ['reply'=>'No encontré convenios con vencimiento futuro.','grounding'=>['type'=>'query','total'=>0]];
+        if (!$r) return $this->fallback("No encontré convenios con vencimiento futuro.");
 
         $fmt = fn($d)=>Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY');
-        return ['reply'=>"El convenio más próximo a vencer es **{$r->titulo}** — {$fmt($r->fecha_vencimiento)} ({$r->estado}).",'grounding'=>['type'=>'query','total'=>1]];
+        return [
+            'reply'=>"El convenio más próximo a vencer es **{$r->titulo}** — {$fmt($r->fecha_vencimiento)} ({$r->estado}).",
+            'grounding'=>['type'=>'query','total'=>1]
+        ];
     }
 
     private function answerRiesgo(string $nivel): array
@@ -524,35 +625,41 @@ class AssistantController extends Controller
             ->select('c.titulo','ar.score','c.fecha_vencimiento')
             ->orderByDesc('ar.score')->get();
 
-        if ($rows->isEmpty()) return ['reply'=>"No hay convenios con riesgo **{$nivel}** en el último análisis.",'grounding'=>['type'=>'query','total'=>0]];
+        if ($rows->isEmpty()) return $this->fallback("No hay convenios con riesgo {$nivel} en el último análisis.");
 
         $fmt = fn($d)=>$d ? Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY') : '—';
         $txt = "Convenios con riesgo **{$nivel}** (último análisis):\n";
-        foreach ($rows as $r) $txt .= "• {$r->titulo} — Score: ".number_format($r->score*100,0)."% — Vence: ".$fmt($r->fecha_vencimiento)."\n";
+        foreach ($rows as $r) {
+            $txt .= "• {$r->titulo} — Score: ".number_format($r->score*100,0)."% — Vence: ".$fmt($r->fecha_vencimiento)."\n";
+        }
         return ['reply'=>$txt,'grounding'=>['type'=>'query','total'=>count($rows)]];
     }
 
     private function answerClausulasUltimoAnalisisPorTitulo(string $needle): array
     {
         $c = $this->fuzzyFindConvenio($needle);
-        if (!$c) return ['reply'=>"No encontré un convenio cuyo título se parezca a «{$this->sanitizeName($needle)}».",'grounding'=>['type'=>'query','total'=>0]];
+        if (!$c) return $this->fallback("No pude identificar el convenio «{$this->sanitizeName($needle)}».");
 
         $an = DB::table('analisis_riesgos')->where('convenio_id',$c->id)->orderByDesc('created_at')->first();
-        if (!$an) return ['reply'=>"El convenio **{$c->titulo}** no tiene análisis de riesgo registrados.",'grounding'=>['type'=>'convenio','id'=>$c->id]];
+        if (!$an) {
+            return $this->fallback("El convenio **{$c->titulo}** no tiene análisis de riesgo registrados.");
+        }
 
-        $rows = DB::table('riesgo_dataset')->where('convenio_id',$c->id);
-        if ($an->version_id) $rows = $rows->where('version_id', $an->version_id);
-        $rows = $rows->select('text','label_json')->limit(300)->get();
+        $rowsQ = DB::table('riesgo_dataset')->where('convenio_id',$c->id);
+        if ($an->version_id) $rowsQ = $rowsQ->where('version_id', $an->version_id);
+        $rows = $rowsQ->select('text','label_json')->limit(300)->get();
 
         if ($rows->isEmpty()) {
-            return ['reply'=>"No hay cláusulas/hallazgos almacenados para el último análisis de **{$c->titulo}**.",'grounding'=>['type'=>'convenio','id'=>$c->id]];
+            return $this->fallback("No hay cláusulas/hallazgos almacenados para el último análisis de **{$c->titulo}**.");
         }
 
         $g = ['HIGH'=>[],'MEDIUM'=>[],'LOW'=>[],'NONE'=>[]];
         foreach ($rows as $r) {
             $lab = json_decode((string)$r->label_json,true) ?: [];
             $sev = strtoupper((string)($lab['severity'] ?? 'NONE'));
-            $g[$sev][] = trim((string)($r->text ?? ''));
+            $txt = $this->cleanTextHard((string)($r->text ?? ''));
+            if ($txt === '') continue;
+            $g[$sev][] = $txt;
         }
 
         $fmtList = function(array $arr, int $max=12){
@@ -567,7 +674,11 @@ class AssistantController extends Controller
         $txt .= "- Severidad ALTA:\n".$fmtList($g['HIGH'])."\n";
         $txt .= "- Severidad MEDIA:\n".$fmtList($g['MEDIUM'])."\n";
         $txt .= "- Severidad BAJA:\n".$fmtList($g['LOW'])."\n";
-        return ['reply'=>$txt,'grounding'=>['type'=>'analysis','convenio_id'=>$c->id,'version_id'=>$an->version_id]];
+
+        return [
+            'reply'=>$txt,
+            'grounding'=>['type'=>'analysis','convenio_id'=>$c->id,'version_id'=>$an->version_id]
+        ];
     }
 
     private function answerConveniosUnaVersion(): array
@@ -578,39 +689,48 @@ class AssistantController extends Controller
             ->having('cnt','=',1)
             ->get();
 
-        if ($rows->isEmpty()) return ['reply'=>'No hay convenios con una sola versión.','grounding'=>['type'=>'query','total'=>0]];
+        if ($rows->isEmpty()) return $this->fallback("No hay convenios con una sola versión.");
 
         $ids  = $rows->pluck('convenio_id')->all();
         $conv = DB::table('convenios')->select('id','titulo','fecha_vencimiento','estado')->whereIn('id',$ids)->orderBy('titulo')->get();
 
         $fmt = fn($d)=>$d ? Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY') : '—';
         $txt = "Convenios con UNA sola versión:\n";
-        foreach ($conv as $c) $txt .= "• {$c->titulo} — Vence: ".$fmt($c->fecha_vencimiento)." ({$c->estado})\n";
+        foreach ($conv as $c) {
+            $txt .= "• {$c->titulo} — Vence: ".$fmt($c->fecha_vencimiento)." ({$c->estado})\n";
+        }
         return ['reply'=>$txt,'grounding'=>['type'=>'query','total'=>count($conv)]];
     }
 
     private function answerCantidadVersionesPorTitulo(string $needle): array
     {
         $c = $this->fuzzyFindConvenio($needle);
-        if (!$c) return ['reply'=>"No encontré un convenio cuyo título se parezca a «{$this->sanitizeName($needle)}».",'grounding'=>['type'=>'query','total'=>0]];
+        if (!$c) return $this->fallback("No pude identificar el convenio «{$this->sanitizeName($needle)}».");
 
         $n = (int) DB::table('versiones_convenio')->where('convenio_id',$c->id)->count();
-        return ['reply'=>"El convenio **{$c->titulo}** tiene **{$n}** versión(es).",'grounding'=>['type'=>'convenio','id'=>$c->id]];
+        return [
+            'reply'=>"El convenio **{$c->titulo}** tiene **{$n}** versión(es).",
+            'grounding'=>['type'=>'convenio','id'=>$c->id]
+        ];
     }
 
     private function answerDescripcionConvenio(string $needle): array
     {
         $c = $this->fuzzyFindConvenio($needle);
-        if (!$c) return ['reply'=>"No encontré un convenio cuyo título se parezca a «{$this->sanitizeName($needle)}».",'grounding'=>['type'=>'query','total'=>0]];
-        $desc = trim((string)($c->descripcion ?? ''));
+        if (!$c) return $this->fallback("No pude identificar el convenio «{$this->sanitizeName($needle)}».");
+
+        $desc = $this->cleanTextHard((string)($c->descripcion ?? ''));
         if ($desc === '') $desc = '—';
-        return ['reply'=>"Descripción de **{$c->titulo}**:\n{$desc}",'grounding'=>['type'=>'convenio','id'=>$c->id]];
+        return [
+            'reply'=>"Descripción de **{$c->titulo}**:\n{$desc}",
+            'grounding'=>['type'=>'convenio','id'=>$c->id]
+        ];
     }
 
     private function answerContactoConvenio(string $needle): array
     {
         $c = $this->fuzzyFindConvenio($needle);
-        if (!$c) return ['reply'=>"No encontré un convenio cuyo título se parezca a «{$this->sanitizeName($needle)}».",'grounding'=>['type'=>'query','total'=>0]];
+        if (!$c) return $this->fallback("No pude identificar el convenio «{$this->sanitizeName($needle)}».");
 
         $cols = Schema::getColumnListing('convenios');
         $nameCol  = collect(['responsable','responsable_nombre','contacto','contacto_nombre','persona_contacto'])->first(fn($x)=>in_array($x,$cols,true));
@@ -625,47 +745,65 @@ class AssistantController extends Controller
 
         $lines = ["Contacto de **{$c->titulo}**:"];
         $hasOne = false;
-        if ($nameCol && !empty($row->{$nameCol})) { $lines[] = "- Responsable: {$row->{$nameCol}}"; $hasOne = true; }
-        if ($areaCol && !empty($row->{$areaCol})) { $lines[] = "- Área/Unidad: {$row->{$areaCol}}"; $hasOne = true; }
-        if ($mailCol && !empty($row->{$mailCol})) { $lines[] = "- Email: {$row->{$mailCol}}"; $hasOne = true; }
-        if ($telCol  && !empty($row->{$telCol}))  { $lines[] = "- Teléfono: {$row->{$telCol}}"; $hasOne = true; }
+        if ($nameCol && !empty($row->{$nameCol})) { $lines[] = "- Responsable: ".$this->cleanTextHard($row->{$nameCol}); $hasOne = true; }
+        if ($areaCol && !empty($row->{$areaCol})) { $lines[] = "- Área/Unidad: ".$this->cleanTextHard($row->{$areaCol}); $hasOne = true; }
+        if ($mailCol && !empty($row->{$mailCol})) { $lines[] = "- Email: ".$this->cleanTextHard($row->{$mailCol}); $hasOne = true; }
+        if ($telCol  && !empty($row->{$telCol}))  { $lines[] = "- Teléfono: ".$this->cleanTextHard($row->{$telCol}); $hasOne = true; }
 
         if (!$hasOne) $lines[] = "No hay datos de contacto registrados en el convenio.";
-        return ['reply'=>implode("\n",$lines),'grounding'=>['type'=>'convenio','id'=>$c->id]];
+        return [
+            'reply'=>implode("\n",$lines),
+            'grounding'=>['type'=>'convenio','id'=>$c->id]
+        ];
     }
 
     private function answerDetalleConvenioPorTitulo(string $needle): array
     {
         $c = $this->fuzzyFindConvenio($needle);
-        if (!$c) return ['reply'=>"No encontré un convenio cuyo título se parezca a «{$this->sanitizeName($needle)}».",'grounding'=>['type'=>'query','total'=>0]];
+        if (!$c) return $this->fallback("No pude identificar el convenio «{$this->sanitizeName($needle)}».");
 
         $vers = DB::table('versiones_convenio')->where('convenio_id',$c->id)->orderByDesc('numero_version')->limit(10)->get();
         $risk = DB::table('analisis_riesgos')->where('convenio_id',$c->id)->orderByDesc('created_at')->first();
 
         $fmt = fn($d)=>$d ? Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY') : '—';
-        $txt = "Detalles del convenio **{$c->titulo}**\n- Estado: {$c->estado}\n- Fecha de Firma: ".$fmt($c->fecha_firma)."\n- Fecha de Vencimiento: ".$fmt($c->fecha_vencimiento)."\n";
+        $txt = "Detalles del convenio **{$c->titulo}**\n";
+        $txt .= "- Estado: {$c->estado}\n";
+        $txt .= "- Fecha de Firma: ".$fmt($c->fecha_firma)."\n";
+        $txt .= "- Fecha de Vencimiento: ".$fmt($c->fecha_vencimiento)."\n";
         if ($risk) $txt .= "- Riesgo más reciente: {$risk->risk_level} (score ".number_format((float)$risk->score,3).")\n";
         if ($vers->count()) {
             $txt .= "- Versiones (máx. 10):\n";
-            foreach ($vers as $v) $txt .= "  • v{$v->numero_version} (".$fmt($v->fecha_version).") — {$v->observaciones}\n";
+            foreach ($vers as $v) {
+                $obs = $this->cleanTextHard((string)$v->observaciones);
+                $txt .= "  • v{$v->numero_version} (".$fmt($v->fecha_version).") — {$obs}\n";
+            }
         } else {
             $txt .= "- Aún no hay versiones registradas.\n";
         }
-        return ['reply'=>$txt,'grounding'=>['type'=>'convenio','id'=>$c->id]];
+        return [
+            'reply'=>$txt,
+            'grounding'=>['type'=>'convenio','id'=>$c->id]
+        ];
     }
 
     private function answerVersionesPorTitulo(string $needle): array
     {
         $c = $this->fuzzyFindConvenio($needle);
-        if (!$c) return ['reply'=>"No encontré un convenio cuyo título se parezca a «{$this->sanitizeName($needle)}».",'grounding'=>['type'=>'query','total'=>0]];
+        if (!$c) return $this->fallback("No pude identificar el convenio «{$this->sanitizeName($needle)}».");
 
         $rows = DB::table('versiones_convenio')->where('convenio_id',$c->id)->orderByDesc('numero_version')->get();
-        if ($rows->isEmpty()) return ['reply'=>"El convenio **{$c->titulo}** no tiene versiones registradas.",'grounding'=>['type'=>'convenio','id'=>$c->id]];
+        if ($rows->isEmpty()) return $this->fallback("El convenio **{$c->titulo}** no tiene versiones registradas.");
 
         $fmt = fn($d)=>$d ? Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY') : '—';
         $txt = "Versiones del convenio **{$c->titulo}**:\n";
-        foreach ($rows as $v) $txt .= "• v{$v->numero_version} (".$fmt($v->fecha_version).") — {$v->observaciones}\n";
-        return ['reply'=>$txt,'grounding'=>['type'=>'convenio','id'=>$c->id,'versions'=>count($rows)]];
+        foreach ($rows as $v) {
+            $obs = $this->cleanTextHard((string)$v->observaciones);
+            $txt .= "• v{$v->numero_version} (".$fmt($v->fecha_version).") — {$obs}\n";
+        }
+        return [
+            'reply'=>$txt,
+            'grounding'=>['type'=>'convenio','id'=>$c->id,'versions'=>count($rows)]
+        ];
     }
 
     /* ----------- Contenido de versión (con /qa) ------------ */
@@ -681,11 +819,11 @@ class AssistantController extends Controller
             if ($only->count() === 1) {
                 $c = (object)['id'=>$only[0]->id,'titulo'=>$only[0]->titulo];
             } else {
-                return ['reply'=>"Necesito el nombre del convenio. Ej.: «háblame del contenido de la versión inicial de mi convenio con BoA».",'grounding'=>['type'=>'ask']];
+                return $this->fallback("Necesito el nombre del convenio. Por ejemplo: «háblame del contenido de la versión inicial de mi convenio con <<nombre del convenio>>».");
             }
         } else {
             $c = $this->fuzzyFindConvenio($name);
-            if (!$c) return ['reply'=>"No encontré un convenio cuyo título se parezca a «{$this->sanitizeName($name)}».",'grounding'=>['type'=>'query','total'=>0]];
+            if (!$c) return $this->fallback("No pude identificar el convenio «{$this->sanitizeName($name)}».");
         }
 
         // versión
@@ -695,11 +833,11 @@ class AssistantController extends Controller
         elseif ($hint['type']==='final')  $v = (clone $q)->whereRaw('LOWER(observaciones) LIKE ?',['%final%'])->orderByDesc('fecha_version')->first() ?: $q->orderByDesc('numero_version')->first();
         else                               $v = $q->orderByDesc('numero_version')->first();
 
-        if (!$v) return ['reply'=>"No encontré versiones para **{$c->titulo}**.",'grounding'=>['type'=>'convenio','id'=>$c->id]];
+        if (!$v) return $this->fallback("No encontré versiones para **{$c->titulo}**.");
 
-        $texto = (string)($v->texto ?? '');
+        $texto = $this->cleanTextHard((string)($v->texto ?? ''));
         if (trim($texto) === '') {
-            return ['reply'=>"La versión v{$v->numero_version} de **{$c->titulo}** no tiene texto almacenado. Sube un PDF/DOCX legible para habilitar el análisis.",'grounding'=>['type'=>'version','convenio_id'=>$c->id,'version_id'=>$v->id]];
+            return $this->fallback("La versión v{$v->numero_version} de **{$c->titulo}** no tiene texto almacenado. Sube un PDF/DOCX legible para habilitar el análisis.");
         }
 
         // Microservicio QA
@@ -718,20 +856,60 @@ class AssistantController extends Controller
                 $res = $client->post('/qa', ['json'=>$payload]);
                 $json = json_decode((string)$res->getBody(), true);
                 if (!empty($json['answer'])) {
-                    $ans = trim($json['answer']);
-                    return ['reply'=>"**{$c->titulo} — v{$v->numero_version}**\n{$ans}", 'grounding'=>['type'=>'version','convenio_id'=>$c->id,'version_id'=>$v->id,'numero'=>$v->numero_version]];
+                    $ans = $this->cleanTextHard(trim($json['answer']));
+                    if ($ans !== '' && mb_strlen($ans,'UTF-8') >= 4 && stripos($ans,'no tengo una respuesta exacta') === false) {
+                        return [
+                            'reply'=>"**{$c->titulo} — v{$v->numero_version}**\n{$ans}",
+                            'grounding'=>[
+                                'type'=>'version',
+                                'convenio_id'=>$c->id,
+                                'version_id'=>$v->id,
+                                'numero'=>$v->numero_version
+                            ]
+                        ];
+                    }
                 }
             }
         } catch (\Throwable $e) {
-            // fallback
+            // fallback silencioso
         }
 
         // Snippet
-        $plain   = preg_replace("/\s+/", " ", strip_tags($texto));
-        $snippet = mb_substr($plain, 0, 900, 'UTF-8');
-        if (mb_strlen($plain,'UTF-8') > 900) $snippet .= " …";
+        // ANTES
+        // $plain   = preg_replace("/\s+/", " ", strip_tags($texto));
+        // $snippet = mb_substr($plain, 0, 6000, 'UTF-8');
+        // if (mb_strlen($plain,'UTF-8') > 900) $snippet .= " …";
+        // $snippet = $this->cleanTextHard($snippet);
+
+        // DESPUÉS
+        $plain = strip_tags($texto);
+
+        // normalizar saltos de línea y espacios SIN destruir párrafos
+        $plain = str_replace(["\r\n", "\r"], "\n", $plain);
+        $plain = preg_replace('/[ \t]+/u', ' ', $plain);
+        $plain = preg_replace('/\n{3,}/u', "\n\n", $plain);
+
+        // Opción 2: límite grande pero razonable (por ejemplo 20000 chars)
+        $MAX_CHARS = 100000;
+        if (mb_strlen($plain, 'UTF-8') > $MAX_CHARS) {
+            $snippet = mb_substr($plain, 0, $MAX_CHARS, 'UTF-8') . " …";
+        } else {
+            $snippet = $plain;
+        }
+
+        // limpiar basura pero manteniendo saltos de línea
+        $snippet = $this->cleanReply($snippet);
+
         $reply = "Contenido de **{$c->titulo}** — v{$v->numero_version} ({$v->observaciones}):\n{$snippet}";
-        return ['reply'=>$reply,'grounding'=>['type'=>'version','convenio_id'=>$c->id,'version_id'=>$v->id,'numero'=>$v->numero_version]];
+        return [
+            'reply'=>$reply,
+            'grounding'=>[
+                'type'=>'version',
+                'convenio_id'=>$c->id,
+                'version_id'=>$v->id,
+                'numero'=>$v->numero_version
+            ]
+        ];
     }
 
     private function answerContenidoConvenioUltimaVersion(string $msg): array
@@ -742,15 +920,17 @@ class AssistantController extends Controller
             if ($only->count() === 1) {
                 $c = (object)['id'=>$only[0]->id,'titulo'=>$only[0]->titulo];
             } else {
-                return ['reply'=>"¿De qué convenio hablamos? Ej.: «analiza el contenido de mi convenio con BoA».",'grounding'=>['type'=>'ask']];
+                return $this->fallback("¿De qué convenio hablamos? Por ejemplo: «analiza el contenido de mi convenio con <<nombre del convenio>>».");
             }
         } else {
             $c = $this->fuzzyFindConvenio($name);
-            if (!$c) return ['reply'=>"No encontré un convenio cuyo título se parezca a «{$this->sanitizeName($name)}».",'grounding'=>['type'=>'query','total'=>0]];
+            if (!$c) return $this->fallback("No pude identificar el convenio «{$this->sanitizeName($name)}».");
         }
 
         $v = DB::table('versiones_convenio')->where('convenio_id',$c->id)->orderByDesc('numero_version')->first();
-        if (!$v) return ['reply'=>"El convenio **{$c->titulo}** aún no tiene versiones.","grounding"=>['type'=>'convenio','id'=>$c->id]];
+        if (!$v) {
+            return $this->fallback("El convenio **{$c->titulo}** aún no tiene versiones.");
+        }
 
         $msg2 = $msg.' (considera la última versión)';
         return $this->answerContenidoVersion("{$msg2} versión {$v->numero_version} del convenio {$c->titulo}");
@@ -764,7 +944,7 @@ class AssistantController extends Controller
         if (Schema::hasTable('notifications')) $table = 'notifications';
         elseif (Schema::hasTable('notificaciones')) $table = 'notificaciones';
 
-        if (!$table) return ['reply'=>"No hay tabla de notificaciones en el sistema.",'grounding'=>['type'=>'query','total'=>0]];
+        if (!$table) return $this->fallback("No hay tabla de notificaciones en el sistema.");
 
         $cols = Schema::getColumnListing($table);
         $hasEstado   = in_array('estado',$cols,true);
@@ -784,7 +964,7 @@ class AssistantController extends Controller
 
         $rows = DB::table($table)->select($sel)->orderByDesc('created_at')->limit(50)->get();
 
-        if ($rows->isEmpty()) return ['reply'=>"No hay notificaciones.","grounding"=>['type'=>'query','total'=>0]];
+        if ($rows->isEmpty()) return $this->fallback("No hay notificaciones registradas.");
 
         $fmt = fn($d)=>Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY');
         $txt = "Notificaciones (máx. 50):\n";
@@ -792,8 +972,9 @@ class AssistantController extends Controller
             $tipo  = $r->tipo     ?? 'EVENTO';
             $est   = $r->estado   ?? '—';
             $conv  = $r->convenio_id ?? '—';
-            $msg   = $r->mensaje  ?? '';
+            $msg   = $this->cleanTextHard((string)($r->mensaje  ?? ''));
             $flag  = isset($r->leido) ? ($r->leido ? 'LEÍDA' : 'NO LEÍDA') : '';
+
             $txt .= "• ".$fmt($r->created_at)." — {$tipo}";
             if ($est !== '—') $txt .= " — {$est}";
             if ($conv !== '—') $txt .= " — Convenio: {$conv}";
@@ -826,12 +1007,16 @@ class AssistantController extends Controller
 
         $ctxLines = [];
         foreach ($cands as $c) {
-            $ctxLines[] = "CONVENIO #{$c->id} «{$c->titulo}» — estado: {$c->estado}; firma: {$c->fecha_firma}; vencimiento: {$c->fecha_vencimiento}";
+            $ctxLines[] = $this->cleanTextHard("CONVENIO #{$c->id} «{$c->titulo}» — estado: {$c->estado}; firma: {$c->fecha_firma}; vencimiento: {$c->fecha_vencimiento}");
             $vers = DB::table('versiones_convenio')->where('convenio_id',$c->id)->orderByDesc('numero_version')->limit(2)->get();
             foreach ($vers as $v) {
-                $ctxLines[] = "  • v{$v->numero_version} — {$v->observaciones}";
+                $line = "  • v{$v->numero_version} — ".$this->cleanTextHard((string)$v->observaciones);
+                $ctxLines[] = $line;
                 if (!empty($v->texto)) {
-                    $ctxLines[] = "    Texto: ".mb_strimwidth(strip_tags((string)$v->texto), 0, 240, '…','UTF-8');
+                    $clean = $this->cleanTextHard(strip_tags((string)$v->texto));
+                    if ($clean !== '') {
+                        $ctxLines[] = "    Texto: ".mb_strimwidth($clean, 0, 10000, '…','UTF-8');
+                    }
                 }
             }
         }
@@ -846,10 +1031,13 @@ class AssistantController extends Controller
 
     private function askOllama(string $userMsg, string $contextText): string
     {
+        $contextText = $this->cleanTextHard($contextText);
+
         $system = <<<SYS
 Eres un asistente experto en gestión de convenios. Responde SIEMPRE en español, claro y conciso.
 Usa EXCLUSIVAMENTE la información del contexto y consultas a la base de datos (ya incorporadas en el mensaje del sistema).
-Si no hay datos suficientes, di: "No tengo esa información en el sistema" y sugiere qué dato pedir (ej.: nombre exacto del convenio).
+Si no hay datos suficientes o la pregunta es ambigua, di literalmente:
+"No tengo una respuesta exacta para esa consulta, pero si quieres puedo mostrarte información relacionada o decirte qué dato necesito para ayudarte mejor."
 No inventes fuentes ni datos. Formatea con viñetas al listar.
 Contexto:
 {$contextText}
@@ -864,7 +1052,7 @@ SYS;
             ],
             'options'  => [
                 'temperature'=>0.2,
-                'num_ctx'=>2048,
+                'num_ctx'=>16384,
             ],
         ];
 
@@ -872,6 +1060,6 @@ SYS;
         $resp   = $client->post('/api/chat', ['json'=>$payload]);
         $json   = json_decode((string)$resp->getBody(), true);
         $reply  = $json['message']['content'] ?? null;
-        return $reply ? trim($reply) : 'No pude generar una respuesta.';
+        return $reply ? trim($reply) : 'No tengo una respuesta exacta para esa consulta, pero si quieres puedo mostrarte información relacionada o decirte qué dato necesito para ayudarte mejor.';
     }
 }
