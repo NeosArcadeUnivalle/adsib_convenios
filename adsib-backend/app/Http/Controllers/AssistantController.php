@@ -69,36 +69,6 @@ class AssistantController extends Controller
         return trim($s);
     }
 
-    private function cleanReply(string $s): string
-    {
-        // Mantener saltos de línea, pero limpiar basura
-
-        // 1) quitar caracteres de control (excepto \n y \r)
-        $s = preg_replace('/[\x00-\x09\x0B-\x0C\x0E-\x1F\x7F\xAD]/u', ' ', $s);
-
-        // 2) quitar entidades HTML numéricas y simbólicas: &#8203; &nbsp; &quot; etc.
-        $s = preg_replace('/&#\d+;?/u', ' ', $s);
-        $s = preg_replace('/&[A-Za-z0-9#]+;/', ' ', $s);
-
-        // 3) quitar bloques numéricos largos tipo 1129283224902 (códigos de OCR)
-        $s = preg_replace('/\b\d{6,}\b/u', ' ', $s);
-
-        // 4) normalizar espacios dentro de cada línea
-        $s = str_replace("\r\n", "\n", $s);           // normalizar saltos Windows
-        $lines = explode("\n", $s);
-        foreach ($lines as &$line) {
-            $line = preg_replace('/[ \t]+/u', ' ', $line);
-            $line = trim($line);
-        }
-        unset($line);
-
-        // 5) reconstruir, evitando más de 2 saltos seguidos
-        $s = implode("\n", array_filter($lines, fn($l) => $l !== ''));
-        $s = preg_replace('/\n{3,}/u', "\n\n", $s);
-
-        return trim($s);
-    }
-
     /* Fallback genérico cuando no hay respuesta clara */
     private function fallback(string $msg = "No tengo una respuesta exacta para esa consulta."): array
     {
@@ -134,7 +104,7 @@ class AssistantController extends Controller
 
         // Intents directos (respuestas por SQL)
         if ($direct = $this->tryDirectAnswers($msg, $context)) {
-            $direct['reply'] = $this->cleanReply($direct['reply'] ?? '');
+            $direct['reply'] = $this->cleanTextHard($direct['reply'] ?? '');
 
             if ($direct['reply'] === '' || mb_strlen($direct['reply'], 'UTF-8') < 4) {
                 $direct = $this->fallback();
@@ -148,7 +118,7 @@ class AssistantController extends Controller
 
         try {
             $reply = $this->askOllama($msg, $ground['context_text'] ?? '');
-            $reply = $this->cleanReply($reply);
+            $reply = $this->cleanTextHard($reply);
 
             if ($reply === '' || mb_strlen($reply, 'UTF-8') < 4) {
                 $reply = "No tengo una respuesta exacta para esa consulta, pero si quieres puedo mostrarte información relacionada o decirte qué dato necesito para ayudarte mejor.";
@@ -875,30 +845,10 @@ class AssistantController extends Controller
         }
 
         // Snippet
-        // ANTES
-        // $plain   = preg_replace("/\s+/", " ", strip_tags($texto));
-        // $snippet = mb_substr($plain, 0, 6000, 'UTF-8');
-        // if (mb_strlen($plain,'UTF-8') > 900) $snippet .= " …";
-        // $snippet = $this->cleanTextHard($snippet);
-
-        // DESPUÉS
-        $plain = strip_tags($texto);
-
-        // normalizar saltos de línea y espacios SIN destruir párrafos
-        $plain = str_replace(["\r\n", "\r"], "\n", $plain);
-        $plain = preg_replace('/[ \t]+/u', ' ', $plain);
-        $plain = preg_replace('/\n{3,}/u', "\n\n", $plain);
-
-        // Opción 2: límite grande pero razonable (por ejemplo 20000 chars)
-        $MAX_CHARS = 100000;
-        if (mb_strlen($plain, 'UTF-8') > $MAX_CHARS) {
-            $snippet = mb_substr($plain, 0, $MAX_CHARS, 'UTF-8') . " …";
-        } else {
-            $snippet = $plain;
-        }
-
-        // limpiar basura pero manteniendo saltos de línea
-        $snippet = $this->cleanReply($snippet);
+        $plain   = preg_replace("/\s+/", " ", strip_tags($texto));
+        $snippet = mb_substr($plain, 0, 6000, 'UTF-8');
+        if (mb_strlen($plain,'UTF-8') > 900) $snippet .= " …";
+        $snippet = $this->cleanTextHard($snippet);
 
         $reply = "Contenido de **{$c->titulo}** — v{$v->numero_version} ({$v->observaciones}):\n{$snippet}";
         return [

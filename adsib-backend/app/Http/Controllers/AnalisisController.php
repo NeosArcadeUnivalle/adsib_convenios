@@ -18,16 +18,20 @@ class AnalisisController extends Controller
     protected function norm(string $s): string
     {
         $s = mb_strtolower($s, 'UTF-8');
-        $s = strtr($s,
-            ['á'=>'a','é'=>'e','í'=>'i','ó'=>'o','ú'=>'u','ä'=>'a','ë'=>'e','ï'=>'i','ö'=>'o','ü'=>'u','ñ'=>'n']
-        );
+        $s = strtr($s, [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u',
+            'ä' => 'a', 'ë' => 'e', 'ï' => 'i', 'ö' => 'o', 'ü' => 'u',
+            'ñ' => 'n',
+        ]);
+
         return $s;
     }
 
-    /** ¿token contiene alguno de los núcleos de riesgo? */
+    /** ¿token contiene alguno de los núcleos de riesgo? (para filtrar SEMANTIC) */
     protected function hasRiskKeyword(string $t): bool
     {
         $t = $this->norm($t);
+
         $KEYS = [
             'precio preferen', 'precios preferen', 'menor precio', 'menores precios',
             'exclusiv', 'trato preferen',
@@ -35,8 +39,11 @@ class AnalisisController extends Controller
             'reemision', 'reexped',
             'presupuesto', 'aprobacion presupuestaria', 'certificacion presupuestaria',
         ];
+
         foreach ($KEYS as $k) {
-            if (mb_strpos($t, $k) !== false) return true;
+            if (mb_strpos($t, $k) !== false) {
+                return true;
+            }
         }
         return false;
     }
@@ -44,16 +51,19 @@ class AnalisisController extends Controller
     /** ¿hay negación contextual cerca del token? */
     protected function hasNegationAround(string $text, string $token): bool
     {
-        $N = 80; // ventana de contexto a cada lado
+        $N  = 80; // ventana de contexto
         $tx = $this->norm($text);
         $tk = $this->norm($token);
+
         $pos = mb_strpos($tx, $tk);
-        if ($pos === false) return false;
+        if ($pos === false) {
+            return false;
+        }
+
         $start = max(0, $pos - $N);
         $end   = min(mb_strlen($tx), $pos + mb_strlen($tk) + $N);
         $win   = mb_substr($tx, $start, $end - $start);
 
-        // patrones de negación o desactivación
         $NEG = [
             'no ', ' no-', 'no implica', 'no confiere', 'no constituye', 'no se asumen',
             'sin ', 'no se admit', 'no reserv', 'no confiere trato prefer',
@@ -61,54 +71,69 @@ class AnalisisController extends Controller
             'sujeto a normativa', 'sujetas? a normativa', 'conforme a normativa',
             'segun normativa', 'de acuerdo a normativa', 'no se autoriz',
         ];
+
         foreach ($NEG as $n) {
-            if (mb_strpos($win, $n) !== false) return true;
+            if (mb_strpos($win, $n) !== false) {
+                return true;
+            }
         }
         return false;
     }
 
     /* ----------------- Helpers para deduplicación por solapamiento ----------------- */
 
-    /** Normalización "estricta" de token para comparar similitud */
     protected function normToken(string $t): string
     {
         $t = $this->norm($t);
         $t = preg_replace('/\s+/', ' ', $t ?? '') ?? '';
+
         return trim($t);
     }
 
-    /** IoU (intersección / unión) de dos rangos [a1,a2), [b1,b2) -> 0..1 */
+    /** IoU de dos rangos [a1,a2), [b1,b2) -> 0..1 */
     protected function iou(int $a1, int $a2, int $b1, int $b2): float
     {
-        if ($a2 <= $a1 || $b2 <= $b1) return 0.0;
+        if ($a2 <= $a1 || $b2 <= $b1) {
+            return 0.0;
+        }
+
         $inter = max(0, min($a2, $b2) - max($a1, $b1));
         $union = max($a2, $b2) - min($a1, $b1);
-        if ($union <= 0) return 0.0;
+
+        if ($union <= 0) {
+            return 0.0;
+        }
+
         return $inter / $union;
     }
 
     /**
-     * Deduplica matches que:
-     *  - comparten tipo de fuente (regla vs. semántico) y severidad
-     *  - y su token normalizado es "similar" (exacto tras normalización)
-     *  - y sus rangos con offsets se solapan con IoU >= 0.6
-     * Se conserva el de mayor cobertura (rango más largo); si igual, el primero.
+     * Deduplica matches:
+     *  - misma fuente (rule/semantic), misma severidad
+     *  - token normalizado igual
+     *  - rangos con IoU >= 0.6
      */
     protected function dedupeOverlaps(array $matches): array
     {
         $kept = [];
+
         foreach ($matches as $m) {
             $tok = $this->normToken((string)($m['token'] ?? ''));
             $src = strtolower((string)($m['source'] ?? ''));
             $sev = strtoupper((string)($m['severity'] ?? 'NONE'));
 
-            $hasOff = isset($m['start'], $m['end']) && is_numeric($m['start']) && is_numeric($m['end']) && ($m['end'] > $m['start']);
+            $hasOff = isset($m['start'], $m['end'])
+                && is_numeric($m['start'])
+                && is_numeric($m['end'])
+                && ($m['end'] > $m['start']);
+
             if (!$hasOff || $tok === '') {
                 $kept[] = $m;
                 continue;
             }
 
-            $s1 = (int)$m['start']; $e1 = (int)$m['end'];
+            $s1 = (int) $m['start'];
+            $e1 = (int) $m['end'];
             $merged = false;
 
             foreach ($kept as $idx => $prev) {
@@ -116,13 +141,24 @@ class AnalisisController extends Controller
                 $src2 = strtolower((string)($prev['source'] ?? ''));
                 $sev2 = strtoupper((string)($prev['severity'] ?? 'NONE'));
 
-                $hasOff2 = isset($prev['start'], $prev['end']) && is_numeric($prev['start']) && is_numeric($prev['end']) && ($prev['end'] > $prev['start']);
-                if (!$hasOff2) continue;
+                $hasOff2 = isset($prev['start'], $prev['end'])
+                    && is_numeric($prev['start'])
+                    && is_numeric($prev['end'])
+                    && ($prev['end'] > $prev['start']);
 
-                if ($src !== $src2 || $sev !== $sev2) continue;
-                if ($tok !== $tok2) continue;
+                if (!$hasOff2) {
+                    continue;
+                }
 
-                $s2 = (int)$prev['start']; $e2 = (int)$prev['end'];
+                if ($src !== $src2 || $sev !== $sev2) {
+                    continue;
+                }
+                if ($tok !== $tok2) {
+                    continue;
+                }
+
+                $s2   = (int) $prev['start'];
+                $e2   = (int) $prev['end'];
                 $over = $this->iou($s1, $e1, $s2, $e2);
 
                 if ($over >= 0.60) {
@@ -140,15 +176,17 @@ class AnalisisController extends Controller
                 $kept[] = $m;
             }
         }
+
         return array_values($kept);
     }
 
     /**
-     * Filtra/depura coincidencias SEMANTIC y pondera el score final.
+     * Filtra coincidencias SEMANTIC y calcula score final.
      */
     protected function filterAndScore(array $matches, string $fullText): array
     {
         $clean = [];
+
         foreach ($matches as $m) {
             $src = strtolower((string)($m['source'] ?? ''));
             if ($src === 'semantic') {
@@ -165,8 +203,8 @@ class AnalisisController extends Controller
 
         $clean = $this->dedupeOverlaps($clean);
 
-        $W_RULE = ['HIGH'=>1.00,'MEDIUM'=>0.60,'LOW'=>0.30,'NONE'=>0.00];
-        $W_SEM  = ['HIGH'=>0.15,'MEDIUM'=>0.08,'LOW'=>0.03,'NONE'=>0.00];
+        $W_RULE = ['HIGH' => 1.00, 'MEDIUM' => 0.60, 'LOW' => 0.30, 'NONE' => 0.00];
+        $W_SEM  = ['HIGH' => 0.15, 'MEDIUM' => 0.08, 'LOW' => 0.03, 'NONE' => 0.00];
 
         $CAP_SEM = 0.35;
         $DENOM   = 7.0;
@@ -174,7 +212,9 @@ class AnalisisController extends Controller
         $TH_MEDIO = 0.45;
         $TH_ALTO  = 0.80;
 
-        $sumRule = 0.0; $sumSem = 0.0;
+        $sumRule = 0.0;
+        $sumSem  = 0.0;
+
         foreach ($clean as $m) {
             $sev = strtoupper((string)($m['severity'] ?? 'NONE'));
             $src = strtolower((string)($m['source'] ?? ''));
@@ -187,19 +227,22 @@ class AnalisisController extends Controller
 
         $sumSem = min($sumSem, $sumRule * $CAP_SEM);
         $total  = $sumRule + $sumSem;
-        $score  = max(0.0, min(1.0, $DENOM > 0 ? ($total / $DENOM) : 0.0));
 
-        $risk = ($score >= $TH_ALTO) ? 'ALTO' : (($score >= $TH_MEDIO) ? 'MEDIO' : 'BAJO');
+        $score = max(0.0, min(1.0, $DENOM > 0 ? ($total / $DENOM) : 0.0));
+
+        $risk = ($score >= $TH_ALTO)
+            ? 'ALTO'
+            : (($score >= $TH_MEDIO) ? 'MEDIO' : 'BAJO');
 
         return [
             'kept_matches' => $clean,
             'score'        => $score,
             'risk_level'   => $risk,
             'dbg'          => [
-                'sums'        => ['rule'=>$sumRule,'semantic'=>$sumSem,'total'=>$total],
+                'sums'        => ['rule' => $sumRule, 'semantic' => $sumSem, 'total' => $total],
                 'denominator' => $DENOM,
                 'cap_sem'     => $CAP_SEM,
-                'thresholds'  => ['MEDIO'=>$TH_MEDIO, 'ALTO'=>$TH_ALTO],
+                'thresholds'  => ['MEDIO' => $TH_MEDIO, 'ALTO' => $TH_ALTO],
             ],
         ];
     }
@@ -217,6 +260,7 @@ class AnalisisController extends Controller
         }
 
         $resp = $this->nlp->analyze($text);
+
         if (!($resp['ok'] ?? false)) {
             return response()->json([
                 'message' => 'No se pudo procesar el análisis.',
@@ -230,12 +274,12 @@ class AnalisisController extends Controller
 
         $calc = $this->filterAndScore($matches, $text);
 
-        $matchesClean = $calc['kept_matches'];
+        $matchesClean       = $calc['kept_matches'];
         $data['matches']    = $matchesClean;
         $data['score']      = $calc['score'];
         $data['risk_level'] = $calc['risk_level'];
-        $data['summary'] = array_merge($data['summary'] ?? [], [
-            'post_score' => $calc['dbg']
+        $data['summary']    = array_merge($data['summary'] ?? [], [
+            'post_score' => $calc['dbg'],
         ]);
 
         $riskLevel = (string) $data['risk_level'];
@@ -277,14 +321,17 @@ class AnalisisController extends Controller
                         'updated_at'  => now(),
                     ];
                 }
+
                 DB::table('riesgo_dataset')->insert($bulk);
             }
 
+            // Notificación por riesgo ALTO / MEDIO
             if (in_array($riskLevel, ['ALTO', 'MEDIO'], true) && $convenioId) {
                 $tipo    = $riskLevel === 'ALTO' ? 'ALTO_RIESGO' : 'MEDIO_RIESGO';
                 $mensaje = $riskLevel === 'ALTO'
                     ? 'Riesgo ALTO detectado por el modelo. Revise cláusulas observadas.'
                     : 'Riesgo MEDIO detectado por el modelo. Requiere revisión.';
+
                 $acciones = json_encode([
                     'detalle' => 'Abrir análisis y revisar coincidencias.',
                     'modelo'  => $modelo,
@@ -323,10 +370,11 @@ class AnalisisController extends Controller
             DB::commit();
 
             $data['saved_id'] = $idAnalisis;
-            return response()->json($data, 200);
 
+            return response()->json($data, 200);
         } catch (\Throwable $e) {
             DB::rollBack();
+
             return response()->json([
                 'message' => 'Error guardando el análisis',
                 'detail'  => $e->getMessage(),
@@ -334,7 +382,7 @@ class AnalisisController extends Controller
         }
     }
 
-    // Historial (general por convenio)
+    // Historial (por convenio) → /analisis?convenio_id=...
     public function index(Request $request)
     {
         $convenioId = $request->query('convenio_id');
@@ -349,9 +397,9 @@ class AnalisisController extends Controller
             ->where('convenio_id', $convenioId)
             ->orderByDesc('analizado_en');
 
-        $total = (clone $query)->count();
-
+        $total    = (clone $query)->count();
         $rawItems = $query->forPage($page, $perPage)->get();
+
         $items = $rawItems->map(function ($r) {
             $r->analizado_en = Carbon::parse($r->analizado_en)->toIso8601String();
             $r->created_at   = Carbon::parse($r->created_at)->toIso8601String();
@@ -371,7 +419,7 @@ class AnalisisController extends Controller
     }
 
     /**
-     * Exporta un análisis en PDF (descarga directa, sin abrir vista).
+     * Exporta un análisis en PDF (descarga directa).
      */
     public function pdf(int $id)
     {
@@ -394,7 +442,7 @@ class AnalisisController extends Controller
             $modelo         = $analysis->modelo ?? 'Desconocido';
             $hallazgos      = $analysis->matches ?? 0;
 
-            $safe = fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+            $safe = fn ($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 
             $html = '
 <!DOCTYPE html>
@@ -416,7 +464,6 @@ class AnalisisController extends Controller
         .pill-bajo { background: #065f46; color: #fff; }
         .pill-otro { background: #4b5563; color: #fff; }
         .mt-2 { margin-top: 8px; }
-        .mt-3 { margin-top: 12px; }
         .mb-0 { margin-bottom: 0; }
         .text-right { text-align: right; }
         .muted { color: #6b7280; font-size: 11px; }
@@ -471,11 +518,10 @@ class AnalisisController extends Controller
 </body>
 </html>';
 
-            $pdf = Pdf::loadHTML($html)->setPaper('A4', 'portrait');
+            $pdf      = Pdf::loadHTML($html)->setPaper('A4', 'portrait');
             $fileName = 'analisis_riesgo_' . $analysis->id . '.pdf';
 
             return $pdf->download($fileName);
-
         } catch (\Throwable $e) {
             return response()->json([
                 'message' => 'Error generando el PDF del análisis',
@@ -484,13 +530,11 @@ class AnalisisController extends Controller
         }
     }
 
-    /**
-     * Renderiza un span con estilo según nivel de riesgo.
-     */
     protected function renderRiskPill(string $nivel): string
     {
-        $n = strtoupper(trim($nivel));
+        $n     = strtoupper(trim($nivel));
         $class = 'pill-otro';
+
         switch ($n) {
             case 'ALTO':
                 $class = 'pill-alto';
@@ -502,6 +546,7 @@ class AnalisisController extends Controller
                 $class = 'pill-bajo';
                 break;
         }
+
         $safe = htmlspecialchars($n, ENT_QUOTES, 'UTF-8');
         return '<span class="pill ' . $class . '">' . $safe . '</span>';
     }

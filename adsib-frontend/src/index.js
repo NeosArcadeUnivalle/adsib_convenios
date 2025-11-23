@@ -21,6 +21,7 @@ import UsersList from "./pages/UsersList";
 import UserCreate from "./pages/UserCreate";
 import UserEdit from "./pages/UserEdit";
 import RecoverPassword from "./pages/RecoverPassword";
+import RiesgoKeywords from "./pages/RiesgoKeywords";
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
@@ -39,7 +40,8 @@ root.render(
           <Route path="/convenios/:id/comparar" element={<ConvenioComparar />} />
           <Route path="/convenios/:id/riesgo" element={<ConvenioRiesgo />} />
           <Route path="/asistente" element={<AssistantPage />} />
-          
+          <Route path="/riesgos/keywords" element={<RiesgoKeywords />} />
+
           {/* Notificaciones */}
           <Route path="/notificaciones" element={<NotificacionesPage />} />
 

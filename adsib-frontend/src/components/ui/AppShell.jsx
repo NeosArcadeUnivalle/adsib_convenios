@@ -154,6 +154,15 @@ export default function AppShell() {
             <span className="text">Usuarios</span>
           </Link>
 
+          <Link
+            className={`nav-link ${pathname.startsWith("/riesgos/keywords") ? "active" : ""}`}
+            to="/riesgos/keywords"
+            title="Clausulas"
+          >
+            <span className="icon" aria-hidden />
+            <span className="text">Clausulas</span>
+          </Link>
+
           {/* Notificaciones + badge */}
           <Link
             className={`nav-link ${pathname.startsWith("/notificaciones") ? "active" : ""}`}
