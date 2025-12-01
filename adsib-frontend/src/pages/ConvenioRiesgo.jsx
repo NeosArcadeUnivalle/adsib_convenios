@@ -34,9 +34,6 @@ const BTN = {
 };
 
 /* =================== helpers =================== */
-const normalize = (s = "") =>
-  s.replace(/\r/g, "").replace(/[ \t]+\n/g, "\n").trim();
-
 const esc = (s = "") =>
   s.replace(/[&<>"']/g, (m) => ({
     "&": "&amp;",
@@ -463,10 +460,38 @@ export default function ConvenioRiesgo() {
     setTexto("");
     setResult(null);
     if (!vid) return;
+
     try {
       setLoading(true);
       const { data } = await api.get(`/versiones/${vid}/texto`);
-      setTexto(normalize(data?.text || ""));
+      let raw = data?.text || "";
+
+      // 🧹 Limpieza base de saltos y espacios
+      raw = raw
+        .replace(/\r\n/g, "\n")        // normaliza Windows -> Unix
+        .replace(/\r/g, "\n")
+        .replace(/[ \t]+\n/g, "\n")    // quita espacios al final de línea
+        .replace(/\n{2,}/g, "\n");     // evita bloques grandes de líneas vacías
+
+      // 🧹 Procesamiento línea por línea
+      const cleanLines = raw
+        .split("\n")
+        .map((l) => l.replace(/[ \t]+$/g, "")) // limpia espacios al final
+        .map((l) => l.replace(/[ \t]{2,}/g, " ")) // comprime espacios internos
+        .filter((l) => {
+          const t = l.trim();
+          if (!t) return false;            // fuera líneas vacías
+
+          // ❌ líneas que empiezan con una cadena larga de dígitos (caso imágenes OCR)
+          // ej: "12216152- para el Oes..." -> se descarta
+          if (/^\d{5,}/.test(t)) return false;
+
+          return true;
+        });
+
+      raw = cleanLines.join("\n").trim();
+
+      setTexto(raw);
     } catch (e) {
       setErr(
         e.response?.data?.message ||
