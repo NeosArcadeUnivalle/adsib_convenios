@@ -50,8 +50,8 @@ class AssistantController extends Controller
     /* ================== LIMPIEZA DE TEXTO FUERTE ================== */
     private function cleanTextHard(string $s): string
     {
-        // elimina caracteres de control / invisibles
-        $s = preg_replace('/[\x00-\x1F\x7F\xAD]/u', ' ', $s);
+        // elimina caracteres de control / invisibles (preserva salto de linea y tab)
+        $s = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\xAD]/u', ' ', $s);
 
         // elimina entidades HTML numéricas tipo &#12345;
         $s = preg_replace('/&#\d+;?/u', ' ', $s);
@@ -62,9 +62,11 @@ class AssistantController extends Controller
         // ejemplo: 1129283224902, 000000123456, etc.
         $s = preg_replace('/\b\d{6,}\b/u', ' ', $s);
 
-        // normaliza saltos / espacios
-        $s = str_replace(["\r", "\n", "\t"], ' ', $s);
-        $s = preg_replace('/\s+/u', ' ', $s);
+        // normaliza saltos y espacios sin romper el formato de salida
+        $s = str_replace(["\r\n", "\r"], "\n", $s);
+        $s = str_replace("\t", ' ', $s);
+        $s = preg_replace('/[ ]{2,}/u', ' ', $s);
+        $s = preg_replace('/\n{3,}/u', "\n\n", $s);
 
         return trim($s);
     }
@@ -73,7 +75,7 @@ class AssistantController extends Controller
     private function fallback(string $msg = "No tengo una respuesta exacta para esa consulta."): array
     {
         return [
-            'reply' => $msg . " Si quieres, puedo mostrarte información relacionada o decirte qué dato necesito para ayudarte mejor.",
+            'reply' => $msg . " Si quieres, puedo mostrarte informacion relacionada o decirte que dato necesito para ayudarte mejor.",
             'grounding' => ['type' => 'fallback'],
         ];
     }
@@ -85,6 +87,7 @@ class AssistantController extends Controller
     {
         $msg     = trim((string)($r->input('message') ?? ''));
         $context = (array) ($r->input('context') ?? []);
+        $msgEff  = $this->expandMessageWithContext($msg, $context);
 
         if ($msg === '') {
             return response()->json([
@@ -94,7 +97,7 @@ class AssistantController extends Controller
         }
 
         // Guard: solo convenios
-        if (!$this->isAboutConvenios($msg)) {
+        if (!$this->isAboutConvenios($msgEff)) {
             $fb = $this->fallback(
                 "Solo puedo ayudarte con consultas sobre convenios (títulos, versiones, fechas de firma/vencimiento, riesgo, notificaciones, responsables, descripciones)."
             );
@@ -103,7 +106,7 @@ class AssistantController extends Controller
         }
 
         // Intents directos (respuestas por SQL)
-        if ($direct = $this->tryDirectAnswers($msg, $context)) {
+        if ($direct = $this->tryDirectAnswers($msgEff, $context)) {
             $direct['reply'] = $this->cleanTextHard($direct['reply'] ?? '');
 
             if ($direct['reply'] === '' || mb_strlen($direct['reply'], 'UTF-8') < 4) {
@@ -114,14 +117,14 @@ class AssistantController extends Controller
         }
 
         // RAG + LLM
-        $ground = $this->buildGrounding($msg);
+        $ground = $this->buildGrounding($msgEff);
 
         try {
-            $reply = $this->askOllama($msg, $ground['context_text'] ?? '');
+            $reply = $this->askOllama($msgEff, $ground['context_text'] ?? '');
             $reply = $this->cleanTextHard($reply);
 
             if ($reply === '' || mb_strlen($reply, 'UTF-8') < 4) {
-                $reply = "No tengo una respuesta exacta para esa consulta, pero si quieres puedo mostrarte información relacionada o decirte qué dato necesito para ayudarte mejor.";
+                $reply = "No tengo una respuesta exacta para esa consulta, pero si quieres puedo mostrarte informacion relacionada o decirte que dato necesito para ayudarte mejor.";
             }
 
             return response()->json([
@@ -153,14 +156,68 @@ class AssistantController extends Controller
             if (Str::contains($t, $k)) return true;
         }
         if (preg_match('/["“”\'‘’].+["“”\'‘’]/u', $msg)) return true;
+
+        $strictMention = $this->extractConvenioMentionStrict($msg);
+        if ($strictMention && $this->fuzzyFindConvenio($strictMention)) return true;
+
+        $tokens = array_slice($this->significantTokens($msg), 0, 6);
+        if (!empty($tokens)) {
+            $normTitulo = $this->normalizeForSql('titulo');
+            $normDesc   = $this->normalizeForSql('descripcion');
+            try {
+                $exists = DB::table('convenios')
+                    ->where(function ($q) use ($tokens, $normTitulo, $normDesc) {
+                        foreach ($tokens as $tok) {
+                            $lk = '%'.$tok.'%';
+                            $q->orWhereRaw("$normTitulo LIKE ?", [$lk])
+                              ->orWhereRaw("$normDesc LIKE ?", [$lk]);
+                        }
+                    })
+                    ->exists();
+                if ($exists) return true;
+            } catch (\Throwable $e) {
+                // continuar con la logica normal
+            }
+        }
         return false;
     }
 
+    private function expandMessageWithContext(string $msg, array $ctx): string
+    {
+        $raw = trim($msg);
+        if ($raw === '') return $raw;
+        if ($this->isAboutConvenios($raw)) return $raw;
+
+        $history = $ctx['history'] ?? [];
+        if (!is_array($history) || empty($history)) return $raw;
+
+        $prevUser = null;
+        for ($i = count($history) - 1; $i >= 0; $i--) {
+            $it = $history[$i] ?? null;
+            if (!is_array($it)) continue;
+            if (($it['role'] ?? '') !== 'user') continue;
+            $txt = trim((string)($it['text'] ?? ''));
+            if ($txt === '') continue;
+            if ($txt === $raw) continue;
+            $prevUser = $txt;
+            break;
+        }
+        if (!$prevUser) return $raw;
+
+        $low = Str::lower(Str::ascii($raw));
+        $isFollowUp = preg_match('/\b(y|tambien|igual|esos|esas|ese|esa|ellos|ellas|detalles?|lista|muestrame|dame)\b/u', $low)
+            || mb_strlen($raw, 'UTF-8') <= 40;
+        if (!$isFollowUp) return $raw;
+
+        if (!$this->isAboutConvenios($prevUser)) return $raw;
+        return $prevUser.' | Seguimiento: '.$raw;
+    }
     /* =================== INTENTS DIRECTOS =================== */
 
     private function tryDirectAnswers(string $msg, array $ctx): ?array
     {
         $t = Str::lower($msg);
+        $tn = Str::lower(Str::ascii($msg));
 
         // FECHA VENCIMIENTO de X
         if (preg_match('/\b(fecha|vence|vencimiento)\b.*\b(convenio)\b/u', $t) || preg_match('/\bvence\b/u', $t)) {
@@ -169,16 +226,33 @@ class AssistantController extends Controller
 
         // VENCEN ESTE AÑO
         if (preg_match('/\b(vencen|vencimiento).*(año|ano|anio)\b/u', $t)) return $this->answerVencenEsteAnio();
+        // YA VENCIDOS / CADUCADOS / EXPIRADOS
+        if (preg_match('/\b(vencid[oa]s?|caducad[oa]s?|expirad[oa]s?)\b/u', $tn) ||
+            preg_match('/\bya\b.*\bvenc/i', $tn) ||
+            preg_match('/\bque\b.*\bya\b.*\bvenc/i', $tn)) {
+            return $this->answerYaVencidos();
+        }
 
         // FIRMADOS ESTE AÑO
         if (preg_match('/\bfirmados?\b.*\b(año|ano|anio)\b/u', $t) || preg_match('/\bconvenios\b.*\bfirmados\b/u', $t)) {
             return $this->answerFirmadosEsteAnio();
         }
 
-        // LISTADOS / ORDENES
+        // ORDENES (antes que listado general)
+        if (
+            preg_match('/\bconvenios\b.*\b(orden|ordenados)\b.*\b(vencim|vencimiento)\b/u', $t) ||
+            preg_match('/\b(lista|listado|muestrame|dame)\b.*\bconvenios\b.*\bpor\b.*\borden\b.*\b(vencim|vencimiento)\b/u', $t) ||
+            preg_match('/\bconvenios\b.*\bpor\b.*\bfecha\b.*\b(vencim|vencimiento)\b/u', $t)
+        ) return $this->answerOrdenPorVencimiento();
+
+        if (
+            preg_match('/\bconvenios\b.*\b(orden|ordenados)\b.*\b(firma)\b/u', $t) ||
+            preg_match('/\b(lista|listado|muestrame|dame)\b.*\bconvenios\b.*\bpor\b.*\borden\b.*\b(firma)\b/u', $t) ||
+            preg_match('/\bconvenios\b.*\bpor\b.*\bfecha\b.*\b(firma)\b/u', $t)
+        ) return $this->answerOrdenPorFirma();
+
+        // LISTADO GENERAL
         if (preg_match('/\b(listado|lista|todos)\b.*\bconvenios\b/u', $t)) return $this->answerListadoConvenios();
-        if (preg_match('/\bconvenios\b.*\b(orden|ordenados)\b.*\b(vencim|vencimiento)\b/u', $t)) return $this->answerOrdenPorVencimiento();
-        if (preg_match('/\bconvenios\b.*\b(orden|ordenados)\b.*\b(firma)\b/u', $t)) return $this->answerOrdenPorFirma();
         if (preg_match('/\bconvenios\b.*\bestado\b.*\b(cerrado|negociacion|borrador|vencido)\b/u', $t, $m)) {
             return $this->answerPorEstado(Str::upper($m[1]));
         }
@@ -243,7 +317,7 @@ class AssistantController extends Controller
 
     /* =================== NOMBRE DE CONVENIO: FLEX/FUZZY =================== */
 
-    private function extractConvenioMention(string $msg): ?string
+    private function extractConvenioMentionStrict(string $msg): ?string
     {
         // 1) entre comillas
         if (preg_match('/["“”\'‘’]([^"“”\'‘’]+)["“”\'‘’]/u', $msg, $m)) {
@@ -257,6 +331,12 @@ class AssistantController extends Controller
         if (preg_match('/\b(?:mi\s+)?convenio\s+([^\.\n,]+)/iu', $msg, $m)) {
             return $this->sanitizeName($m[1]);
         }
+        return null;
+    }
+
+    private function extractConvenioMention(string $msg): ?string
+    {
+        if ($strict = $this->extractConvenioMentionStrict($msg)) return $strict;
         // 4) fallback: última palabra “fuerte” (mayúsculas/abreviatura) dentro del texto
         if (preg_match('/\b([A-ZÁÉÍÓÚÜÑ]{2,}[A-Za-zÁÉÍÓÚÜÑ0-9\.]*)\b/u', $msg, $m)) {
             return $this->sanitizeName($m[1]);
@@ -266,7 +346,6 @@ class AssistantController extends Controller
         if (!empty($tokens)) return $this->sanitizeName(implode(' ', $tokens));
         return null;
     }
-
     private function sanitizeName(string $s): string
     {
         $s = trim($s);
@@ -285,11 +364,16 @@ class AssistantController extends Controller
 
     private function stripAccents(string $s): string
     {
-        $map = [
-            'á'=>'a','é'=>'e','í'=>'i','ó'=>'o','ú'=>'u','ü'=>'u','ñ'=>'n',
-            'Á'=>'A','É'=>'E','Í'=>'I','Ó'=>'O','Ú'=>'U','Ü'=>'U','Ñ'=>'N'
-        ];
-        return strtr($s, $map);
+        return Str::ascii($s);
+    }
+
+    
+    private function compactText(?string $txt, int $max = 280): string
+    {
+        $t = $this->cleanTextHard((string)($txt ?? ''));
+        if ($t === '') return '—';
+        if (mb_strlen($t, 'UTF-8') <= $max) return $t;
+        return rtrim(mb_substr($t, 0, $max, 'UTF-8')).'...';
     }
 
     // Chequeo de extensiones pg
@@ -550,6 +634,31 @@ class AssistantController extends Controller
         $txt = "Convenios en estado {$estado}:\n";
         foreach ($rows as $r) {
             $txt .= "• {$r->titulo} — Vence: ".$fmt($r->fecha_vencimiento)."\n";
+        }
+        return ['reply'=>$txt,'grounding'=>['type'=>'query','total'=>count($rows)]];
+    }
+
+    private function answerYaVencidos(): array
+    {
+        $hoy = now()->toDateString();
+        $rows = DB::table('convenios')
+            ->select('titulo','estado','fecha_firma','fecha_vencimiento')
+            ->where(function ($q) use ($hoy) {
+                $q->where('estado', 'VENCIDO')
+                  ->orWhereDate('fecha_vencimiento', '<', $hoy);
+            })
+            ->orderBy('fecha_vencimiento')
+            ->get();
+
+        if ($rows->isEmpty()) return $this->fallback("No hay convenios ya vencidos.");
+
+        $fmt = fn($d)=>$d ? Carbon::parse($d)->locale('es')->isoFormat('D [de] MMMM [de] YYYY') : '—';
+        $txt = "Convenios que ya vencieron:\n";
+        foreach ($rows as $r) {
+            $txt .= "• {$r->titulo}\n";
+            $txt .= "  - Estado: {$r->estado}\n";
+            $txt .= "  - Fecha Firma: ".$fmt($r->fecha_firma)."\n";
+            $txt .= "  - Fecha Vencimiento: ".$fmt($r->fecha_vencimiento)."\n";
         }
         return ['reply'=>$txt,'grounding'=>['type'=>'query','total'=>count($rows)]];
     }
@@ -942,35 +1051,117 @@ class AssistantController extends Controller
         $normTitulo = $this->normalizeForSql('titulo');
         $normDesc   = $this->normalizeForSql('descripcion');
 
-        // usar tokens significativos del mensaje para levantar candidatos
-        $tokens = $this->significantTokens($msg);
-        $needle = '%'.implode('%',$tokens).'%';
-        if ($needle === '%%') $needle = '%'.Str::lower($this->stripAccents($msg)).'%';
+        $tokens = array_slice($this->significantTokens($msg), 0, 8);
+        $candidateIds = [];
 
-        $cands = DB::table('convenios')
-            ->select('id','titulo','descripcion','estado','fecha_firma','fecha_vencimiento')
-            ->where(function($q) use ($normTitulo,$normDesc,$needle){
-                $q->whereRaw("$normTitulo LIKE ?",[$needle])
-                  ->orWhereRaw("$normDesc LIKE ?",[$needle]);
-            })
-            ->orderByDesc('updated_at')->limit(5)->get();
+        $strictMention = $this->extractConvenioMentionStrict($msg);
+        if ($strictMention) {
+            $best = $this->fuzzyFindConvenio($strictMention);
+            if ($best?->id) $candidateIds[] = (int)$best->id;
+        }
 
-        $ctxLines = [];
+        $query = DB::table('convenios')
+            ->select('id','titulo','descripcion','estado','fecha_firma','fecha_vencimiento','updated_at');
+
+        if (!empty($tokens)) {
+            $query->where(function($q) use ($tokens, $normTitulo, $normDesc) {
+                foreach ($tokens as $tok) {
+                    $lk = '%'.$tok.'%';
+                    $q->orWhereRaw("$normTitulo LIKE ?", [$lk])
+                      ->orWhereRaw("$normDesc LIKE ?", [$lk]);
+                }
+            });
+        }
+
+        $dbCandidates = $query->orderByDesc('updated_at')->limit(8)->get();
+        foreach ($dbCandidates as $cand) $candidateIds[] = (int)$cand->id;
+        $candidateIds = array_values(array_unique($candidateIds));
+
+        if (empty($candidateIds)) {
+            $candidateIds = DB::table('convenios')
+                ->orderByDesc('updated_at')
+                ->limit(5)
+                ->pluck('id')
+                ->map(fn($x)=>(int)$x)
+                ->all();
+        }
+
+        $cands = collect();
+        if (!empty($candidateIds)) {
+            $cands = DB::table('convenios')
+                ->select('id','titulo','descripcion','estado','fecha_firma','fecha_vencimiento')
+                ->whereIn('id', array_slice($candidateIds, 0, 5))
+                ->orderByDesc('updated_at')
+                ->get();
+        }
+
+        $totalConvenios = (int) DB::table('convenios')->count();
+        $byEstadoRows = DB::table('convenios')
+            ->select('estado', DB::raw('COUNT(*) as total'))
+            ->groupBy('estado')
+            ->orderByDesc('total')
+            ->get();
+        $estadoResumen = $byEstadoRows->map(fn($r)=>"{$r->estado}: {$r->total}")->implode(', ');
+
+        $ctxLines = [
+            'RESUMEN GLOBAL:',
+            "- Total convenios: {$totalConvenios}",
+            '- Por estado: '.($estadoResumen !== '' ? $estadoResumen : 'sin datos')
+        ];
+
         foreach ($cands as $c) {
-            $ctxLines[] = $this->cleanTextHard("CONVENIO #{$c->id} «{$c->titulo}» — estado: {$c->estado}; firma: {$c->fecha_firma}; vencimiento: {$c->fecha_vencimiento}");
-            $vers = DB::table('versiones_convenio')->where('convenio_id',$c->id)->orderByDesc('numero_version')->limit(2)->get();
-            foreach ($vers as $v) {
-                $line = "  • v{$v->numero_version} — ".$this->cleanTextHard((string)$v->observaciones);
-                $ctxLines[] = $line;
-                if (!empty($v->texto)) {
-                    $clean = $this->cleanTextHard(strip_tags((string)$v->texto));
-                    if ($clean !== '') {
-                        $ctxLines[] = "    Texto: ".mb_strimwidth($clean, 0, 10000, '…','UTF-8');
+            $ctxLines[] = '';
+            $ctxLines[] = "CONVENIO #{$c->id}: {$this->compactText($c->titulo, 180)}";
+            $ctxLines[] = "- Estado: {$c->estado}";
+            $ctxLines[] = '- Fecha firma: '.($c->fecha_firma ?: '—');
+            $ctxLines[] = '- Fecha vencimiento: '.($c->fecha_vencimiento ?: '—');
+            $ctxLines[] = '- Descripcion: '.$this->compactText($c->descripcion, 350);
+
+            $risk = DB::table('analisis_riesgos')
+                ->where('convenio_id', $c->id)
+                ->orderByDesc('created_at')
+                ->first();
+            if ($risk) {
+                $score = is_numeric($risk->score ?? null) ? number_format((float)$risk->score * 100, 1).'%' : '—';
+                $ctxLines[] = '- Ultimo riesgo: '.($risk->risk_level ?? '—')." (score {$score})";
+            } else {
+                $ctxLines[] = '- Ultimo riesgo: sin analisis';
+            }
+
+            $vers = DB::table('versiones_convenio')
+                ->where('convenio_id', $c->id)
+                ->orderByDesc('numero_version')
+                ->limit(3)
+                ->get();
+
+            if ($vers->isEmpty()) {
+                $ctxLines[] = '- Versiones: sin versiones registradas';
+            } else {
+                $ctxLines[] = '- Versiones recientes:';
+                foreach ($vers as $v) {
+                    $ctxLines[] = "  * v{$v->numero_version} ({$v->fecha_version}) - ".$this->compactText((string)$v->observaciones, 180);
+                    if (!empty($v->texto)) {
+                        $ctxLines[] = '    Texto: '.$this->compactText(strip_tags((string)$v->texto), 900);
                     }
                 }
             }
+
+            $claus = DB::table('riesgo_dataset')
+                ->select('text')
+                ->where('convenio_id', $c->id)
+                ->orderByDesc('id')
+                ->limit(3)
+                ->get();
+            if ($claus->isNotEmpty()) {
+                $ctxLines[] = '- Fragmentos de clausulas/hallazgos:';
+                foreach ($claus as $i => $row) {
+                    $n = $i + 1;
+                    $ctxLines[] = "  * F{$n}: ".$this->compactText((string)$row->text, 240);
+                }
+            }
         }
-        if (empty($ctxLines)) $ctxLines[] = "No hay coincidencias directas en títulos o descripciones.";
+
+        if ($cands->isEmpty()) $ctxLines[] = 'No hay coincidencias directas en titulos o descripciones.';
 
         return [
             'type' => 'rag',
@@ -984,11 +1175,15 @@ class AssistantController extends Controller
         $contextText = $this->cleanTextHard($contextText);
 
         $system = <<<SYS
-Eres un asistente experto en gestión de convenios. Responde SIEMPRE en español, claro y conciso.
-Usa EXCLUSIVAMENTE la información del contexto y consultas a la base de datos (ya incorporadas en el mensaje del sistema).
+Eres un asistente experto en gestion de convenios. Responde SIEMPRE en espanol, claro, ordenado y entendible.
+Usa EXCLUSIVAMENTE la informacion del contexto (derivada de base de datos).
+Prioriza una respuesta util en este orden:
+1) respuesta directa a la pregunta,
+2) soporte breve con datos concretos (fechas, estado, version, riesgo),
+3) si falta precision, pide solo el dato minimo necesario.
 Si no hay datos suficientes o la pregunta es ambigua, di literalmente:
-"No tengo una respuesta exacta para esa consulta, pero si quieres puedo mostrarte información relacionada o decirte qué dato necesito para ayudarte mejor."
-No inventes fuentes ni datos. Formatea con viñetas al listar.
+"No tengo una respuesta exacta para esa consulta, pero si quieres puedo mostrarte informacion relacionada o decirte que dato necesito para ayudarte mejor."
+No inventes fuentes ni datos. Formatea con vinetas al listar.
 Contexto:
 {$contextText}
 SYS;
@@ -1001,8 +1196,9 @@ SYS;
                 ['role'=>'user','content'=>$userMsg],
             ],
             'options'  => [
-                'temperature'=>0.2,
-                'num_ctx'=>16384,
+                'temperature'=>0.1,
+                'num_ctx'=>8192,
+                'num_predict'=>350,
             ],
         ];
 
@@ -1010,6 +1206,8 @@ SYS;
         $resp   = $client->post('/api/chat', ['json'=>$payload]);
         $json   = json_decode((string)$resp->getBody(), true);
         $reply  = $json['message']['content'] ?? null;
-        return $reply ? trim($reply) : 'No tengo una respuesta exacta para esa consulta, pero si quieres puedo mostrarte información relacionada o decirte qué dato necesito para ayudarte mejor.';
+        return $reply ? trim($reply) : 'No tengo una respuesta exacta para esa consulta, pero si quieres puedo mostrarte informacion relacionada o decirte que dato necesito para ayudarte mejor.';
     }
 }
+
+

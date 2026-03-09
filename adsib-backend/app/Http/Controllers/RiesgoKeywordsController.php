@@ -8,6 +8,192 @@ use Illuminate\Validation\Rule;
 
 class RiesgoKeywordsController extends Controller
 {
+    protected function isLikelyAcronym(string $token): bool
+    {
+        return preg_match('/^[A-Z]{2,}$/u', $token) === 1;
+    }
+
+    protected function maxDistanceForLength(int $len): int
+    {
+        if ($len <= 4) return 1;
+        if ($len <= 7) return 2;
+        return 3;
+    }
+
+    protected function normalizeToken(string $t): string
+    {
+        $t = mb_strtolower($t);
+        $t = preg_replace('/[^\p{L}]+/u', '', $t);
+        $t = strtr($t, [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ü' => 'u',
+            'Á' => 'a', 'É' => 'e', 'Í' => 'i', 'Ó' => 'o', 'Ú' => 'u', 'Ü' => 'u',
+        ]);
+        return (string) $t;
+    }
+
+    protected function getKnownTokens(): array
+    {
+        $base = [
+            'precio','precios','presupuesto','presupuestario','descuento','descuentos',
+            'reemision','reemisiones','minimo','minima','minimos','minimas',
+            'orden','cantidad','techo','limite','preferencial','preferenciales',
+            'reducido','reducidos','modificable','modificables','unico','unica',
+            'compra','compras','bajo','bajos','alto','altos','medio','medios',
+            'obligado','obligados','obligacion','obligaciones',
+            'clausula','clausulas','alerta','alertas','temprana','tempranas'
+        ];
+
+        $set = [];
+        foreach ($base as $b) {
+            $set[$this->normalizeToken($b)] = true;
+        }
+
+        try {
+            $rows = DB::table('riesgo_keywords')->select('texto')->get();
+            foreach ($rows as $r) {
+                $txt = (string) ($r->texto ?? '');
+                if ($txt === '') {
+                    continue;
+                }
+                if (preg_match_all('/[\p{L}]+/u', $txt, $m)) {
+                    foreach ($m[0] as $tok) {
+                        $norm = $this->normalizeToken($tok);
+                        if ($norm !== '') {
+                            $set[$norm] = true;
+                        }
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // si falla la BD, seguimos solo con la base
+        }
+
+        return $set;
+    }
+
+    /**
+     * Heuristica suave para evitar textos basura (no bloquea frases cortas validas).
+     */
+    protected function isClauseLike(string $text, array &$reasons = []): bool
+    {
+        $reasons = [];
+        $raw = trim($text);
+
+        if ($raw === '') {
+            $reasons[] = 'texto vacio';
+            return false;
+        }
+
+        $len = mb_strlen($raw);
+        if ($len < 3) {
+            $reasons[] = 'demasiado corto';
+        }
+
+        $total = mb_strlen($raw);
+        $letters = mb_strlen(preg_replace('/[^\p{L}]+/u', '', $raw));
+        if ($letters < 3) {
+            $reasons[] = 'muy pocas letras';
+        }
+
+        if ($total > 0) {
+            $ratio = $letters / $total;
+            if ($ratio < 0.4) {
+                $reasons[] = 'demasiados simbolos o numeros';
+            }
+        }
+
+        // Heuristica anti-gibberish para palabras sueltas largas
+        if (!str_contains($raw, ' ')) {
+            $lower = mb_strtolower($raw);
+            $allowStems = [
+                'precio','presup','descuent','reemision','minim','orden',
+                'cantidad','techo','limite','preferenc','reduc','modific',
+                'unico','compra','bajo','alto','medio'
+            ];
+
+            $hasStem = false;
+            foreach ($allowStems as $s) {
+                if (mb_strpos($lower, $s) !== false) {
+                    $hasStem = true;
+                    break;
+                }
+            }
+
+            if ($len >= 8 && !$hasStem) {
+                if (preg_match('/(?iu)[bcdfghjklmnñpqrstvwxyz]{3,}/', $lower)) {
+                    $reasons[] = 'palabra incoherente';
+                }
+            }
+        }
+
+        // Heuristica de posible falta ortografica (solo si se parece a un termino conocido)
+        if (preg_match_all('/[\p{L}]+/u', $raw, $m)) {
+            $known = $this->getKnownTokens();
+            $tokens = $m[0];
+            $typoReason = null;
+            $unknown = [];
+            foreach ($tokens as $tok) {
+                $norm = $this->normalizeToken($tok);
+                $len = mb_strlen($norm);
+                if ($norm === '' || $len < 3 || $this->isLikelyAcronym($tok)) {
+                    continue;
+                }
+                if (isset($known[$norm])) {
+                    continue;
+                }
+                $best = null;
+                $bestDist = 99;
+                foreach ($known as $k => $_) {
+                    if (abs(strlen($k) - strlen($norm)) > 2) {
+                        continue;
+                    }
+                    $d = levenshtein($norm, $k);
+                    if ($d < $bestDist) {
+                        $bestDist = $d;
+                        $best = $k;
+                        if ($d <= 1) {
+                            break;
+                        }
+                    }
+                }
+                $maxDist = $this->maxDistanceForLength((int)$len);
+                if ($best !== null && $bestDist <= $maxDist) {
+                    $typoReason = 'posible error: "' . $tok . '" -> "' . $best . '"';
+                    break;
+                }
+
+                $unknown[] = $tok;
+            }
+
+            if ($typoReason !== null) {
+                $reasons[] = $typoReason;
+            } elseif (count($tokens) === 1 && !empty($unknown)) {
+                $reasons[] = 'palabra no reconocida: "' . $unknown[0] . '"';
+            }
+        }
+
+        return empty($reasons);
+    }
+
+    /**
+     * GET /riesgos/keywords/known-tokens
+     */
+    public function knownTokens()
+    {
+        try {
+            $known = array_keys($this->getKnownTokens());
+            sort($known);
+
+            return response()->json([
+                'data' => $known,
+                'meta' => ['total' => count($known)],
+            ], 200, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'No se pudieron cargar los tokens conocidos.',
+            ], 500);
+        }
+    }
     /**
      * GET /riesgos/keywords
      * Parámetros opcionales:
@@ -71,6 +257,15 @@ class RiesgoKeywordsController extends Controller
         ]);
 
         try {
+            $reasons = [];
+            if (!$this->isClauseLike((string) $request->texto, $reasons)) {
+                $msg = 'La clausula no parece coherente.';
+                if (!empty($reasons)) {
+                    $msg .= ' Motivos: ' . implode(', ', $reasons) . '.';
+                }
+                return response()->json(['message' => $msg], 422);
+            }
+
             // normaliza el texto para evitar duplicados invisibles
             $texto = trim(mb_strtolower($request->texto));
 
@@ -113,6 +308,15 @@ class RiesgoKeywordsController extends Controller
         ]);
 
         try {
+            $reasons = [];
+            if (!$this->isClauseLike((string) $request->texto, $reasons)) {
+                $msg = 'La clausula no parece coherente.';
+                if (!empty($reasons)) {
+                    $msg .= ' Motivos: ' . implode(', ', $reasons) . '.';
+                }
+                return response()->json(['message' => $msg], 422);
+            }
+
             $texto = trim(mb_strtolower($request->texto));
 
             // validar duplicado excepto este mismo id

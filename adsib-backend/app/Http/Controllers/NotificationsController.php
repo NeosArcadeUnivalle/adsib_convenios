@@ -85,8 +85,8 @@ class NotificationsController extends Controller
  
     /**
      * ALERTAS (para la página de Notificaciones)
-     * - ALTO: vencido/≤30d (solo CERRADO/VENCIDO) o análisis ALTO (solo NEGOCIACION)
-     * - MEDIO: 31–90d (solo CERRADO/VENCIDO) o análisis MEDIO (solo NEGOCIACION)
+     * - ALTO: vencido (solo CERRADO/VENCIDO), <=30d (NEGOCIACION/CERRADO/VENCIDO) o análisis ALTO (solo NEGOCIACION)
+     * - MEDIO: 31–90d (NEGOCIACION/CERRADO/VENCIDO) o análisis MEDIO (solo NEGOCIACION)
      * Devuelve { high: [...], medium: [...], badge: N }
      */
     public function alerts()
@@ -95,20 +95,27 @@ class NotificationsController extends Controller
  
         // ---- 1) VENCIMIENTOS (solo CERRADO / VENCIDO) ----
         $byConv = []; // convenio_id => item combinado
- 
+
         $convs = Convenio::select('id','titulo','estado','fecha_vencimiento')
-            ->whereIn('estado', ['CERRADO','VENCIDO'])
+            ->whereIn('estado', ['NEGOCIACION','CERRADO','VENCIDO'])
             ->whereNotNull('fecha_vencimiento')
             ->get();
- 
+
         foreach ($convs as $c) {
             $fv = $c->fecha_vencimiento ? Carbon::parse($c->fecha_vencimiento) : null;
             if (!$fv) continue;
- 
+
             $days = $today->diffInDays($fv, false); // negativo si ya venció
             $nivel = null;
- 
-            if ($days <= 30) {
+            $estado = strtoupper(trim((string) $c->estado));
+
+            if ($days < 0) {
+                // Vencido solo aplica para CERRADO/VENCIDO.
+                if (!in_array($estado, ['CERRADO', 'VENCIDO'], true)) {
+                    continue;
+                }
+                $nivel = 'ALTO';
+            } elseif ($days <= 30) {
                 $nivel = 'ALTO';
             } elseif ($days <= 90) {
                 $nivel = 'MEDIO';
@@ -141,7 +148,8 @@ class NotificationsController extends Controller
                 'dias'             => $days,
             ];
  
-            $byConv[$c->id] = $this->mergeAlert($byConv[$c->id] ?? null, $row);
+            // Para CERRADO/VENCIDO, solo aplica lógica de vencimiento.
+            $byConv[$c->id] = $row;
         }
  
         // ---- 2) RIESGO (solo NEGOCIACION, tomar la ÚLTIMA por convenio) ----
@@ -175,7 +183,11 @@ class NotificationsController extends Controller
                 'nivel'            => $nivel,
             ];
  
-            $byConv[$n->convenio_id] = $this->mergeAlert($byConv[$n->convenio_id] ?? null, $row);
+            // Regla estricta: nunca mezclar análisis con vencimiento en un mismo convenio.
+            // Si por algún dato inconsistente ya existe una alerta de vencimiento, se preserva.
+            if (!isset($byConv[$n->convenio_id])) {
+                $byConv[$n->convenio_id] = $row;
+            }
         }
  
         // ---- 3) Clasificar ----
@@ -207,36 +219,6 @@ class NotificationsController extends Controller
             'medium' => $medium,
             'badge'  => count($high) + count($medium),
         ], 200, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-    }
- 
-    /** Fusiona dos alertas del mismo convenio, priorizando ALTO y acumulando motivos. */
-    private function mergeAlert(?array $a, array $b): array
-    {
-        if ($a === null) return $b;
- 
-        $lvlA = $a['nivel'] ?? 'MEDIO';
-        $lvlB = $b['nivel'] ?? 'MEDIO';
- 
-        // toma el de mayor prioridad (ALTO sobre MEDIO)
-        $out = ($lvlB === 'ALTO' && $lvlA !== 'ALTO') ? $b : $a;
- 
-        // motivos únicos
-        $out['motivos'] = array_values(array_unique(array_merge($a['motivos'] ?? [], $b['motivos'] ?? [])));
- 
-        // fecha más reciente
-        $fa = strtotime($a['fecha_envio'] ?? $a['created_at']);
-        $fb = strtotime($b['fecha_envio'] ?? $b['created_at']);
-        if ($fb > $fa) {
-            $out['fecha_envio'] = $b['fecha_envio'] ?? $b['created_at'];
-        }
- 
-        // estado si está disponible
-        $out['estado'] = $a['estado'] ?? $b['estado'] ?? null;
- 
-        // nivel más alto
-        $out['nivel'] = ($lvlA === 'ALTO' || $lvlB === 'ALTO') ? 'ALTO' : 'MEDIO';
- 
-        return $out;
     }
  
     /**

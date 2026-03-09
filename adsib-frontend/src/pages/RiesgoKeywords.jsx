@@ -1,5 +1,5 @@
 // src/pages/RiesgoKeywords.jsx
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import api from "../api";
 
 /* =================== Colores base (sólo negros / grises) =================== */
@@ -28,6 +28,53 @@ const BTN = {
   disabled: { opacity: 0.5, cursor: "not-allowed" },
 };
 
+const BASE_TOKENS = [
+  "precio","precios","presupuesto","presupuestario","descuento","descuentos",
+  "reemision","reemisiones","minimo","minima","minimos","minimas",
+  "orden","cantidad","techo","limite","preferencial","preferenciales",
+  "reducido","reducidos","modificable","modificables","unico","unica",
+  "compra","compras","bajo","bajos","alto","altos","medio","medios",
+  "obligado","obligados","obligacion","obligaciones",
+  "clausula","clausulas","alerta","alertas","temprana","tempranas"
+];
+
+const normalizeToken = (t) => {
+  const raw = (t || "").toLowerCase().replace(/[^\p{L}]+/gu, "");
+  return raw
+    .replace(/á/gu, "a")
+    .replace(/é/gu, "e")
+    .replace(/í/gu, "i")
+    .replace(/ó/gu, "o")
+    .replace(/ú|ü/gu, "u");
+};
+
+const levenshtein = (a, b) => {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return dp[m][n];
+};
+
+const maxDistanceForLength = (len) => {
+  if (len <= 4) return 1;
+  if (len <= 7) return 2;
+  return 3;
+};
+
 export default function RiesgoKeywords() {
   const [items, setItems] = useState([]);
   const [meta, setMeta] = useState({ page: 1, per: 10, total: 0, hasMore: false });
@@ -46,10 +93,30 @@ export default function RiesgoKeywords() {
   const [reason, setReason] = useState("");
   const [activo, setActivo] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [textoIssue, setTextoIssue] = useState("");
+  const [remoteKnownTokens, setRemoteKnownTokens] = useState([]);
+
+  const knownTokens = useMemo(() => {
+    const set = new Set(BASE_TOKENS.map(normalizeToken));
+    remoteKnownTokens.forEach((tok) => {
+      const norm = normalizeToken(tok);
+      if (norm) set.add(norm);
+    });
+    items.forEach((it) => {
+      const t = it?.texto || "";
+      const tokens = t.match(/\p{L}+/gu) || [];
+      tokens.forEach((tok) => {
+        const norm = normalizeToken(tok);
+        if (norm) set.add(norm);
+      });
+    });
+    return set;
+  }, [items, remoteKnownTokens]);
 
   const resetForm = () => {
     setEditingId(null);
     setTexto("");
+    setTextoIssue("");
     setSeverity("MEDIUM");
     setReason("");
     setActivo(true);
@@ -95,21 +162,102 @@ export default function RiesgoKeywords() {
     load(1);
   }, [load]);
 
+  useEffect(() => {
+    let mounted = true;
+    const loadKnownTokens = async () => {
+      try {
+        const { data } = await api.get("/riesgos/keywords/known-tokens");
+        if (!mounted) return;
+        setRemoteKnownTokens(Array.isArray(data?.data) ? data.data : []);
+      } catch (_) {
+        if (!mounted) return;
+        setRemoteKnownTokens([]);
+      }
+    };
+    loadKnownTokens();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const totalPages = Math.max(1, Math.ceil((meta.total || 0) / (meta.per || 10)));
 
   /* =================== acciones CRUD =================== */
   const onEdit = (it) => {
     setEditingId(it.id);
     setTexto(it.texto || "");
+    setTextoIssue("");
     setSeverity(it.severity || "MEDIUM");
     setReason(it.reason || "");
     setActivo(Boolean(it.activo));
   };
 
+  const validateTexto = useCallback((value) => {
+    const raw = (value || "").trim();
+    if (!raw) return "El texto es obligatorio.";
+    if (raw.length < 3) return "Muy corto. Agrega mas letras.";
+    const letters = raw.replace(/[^\p{L}]+/gu, "").length;
+    if (letters < 3) return "Muy pocas letras.";
+    const ratio = letters / raw.length;
+    if (ratio < 0.4) return "Demasiados simbolos o numeros.";
+    if (!raw.includes(" ")) {
+      const lower = raw.toLowerCase();
+      const allowStems = [
+        "precio","presup","descuent","reemision","minim","orden",
+        "cantidad","techo","limite","preferenc","reduc","modific",
+        "unico","compra","bajo","alto","medio"
+      ];
+      const hasStem = allowStems.some((s) => lower.includes(s));
+      if (raw.length >= 8 && !hasStem) {
+        if (/[bcdfghjklmnñpqrstvwxyz]{3,}/i.test(lower)) {
+          return "Palabra incoherente. Usa un termino reconocible o una frase.";
+        }
+      }
+    }
+
+    const tokens = raw.match(/\p{L}+/gu) || [];
+    const typoFindings = [];
+    const unknownWords = [];
+    for (const tok of tokens) {
+      const norm = normalizeToken(tok);
+      if (!norm || norm.length < 3) continue;
+      if (/^[A-Z]{2,}$/u.test(tok)) continue;
+      if (knownTokens.has(norm)) continue;
+      let best = null;
+      let bestDist = 99;
+      knownTokens.forEach((k) => {
+        if (Math.abs(k.length - norm.length) > 2) return;
+        const d = levenshtein(norm, k);
+        if (d < bestDist) {
+          bestDist = d;
+          best = k;
+        }
+      });
+      if (best && bestDist <= maxDistanceForLength(norm.length)) {
+        typoFindings.push({ token: tok, suggestion: best });
+        continue;
+      }
+      unknownWords.push(tok);
+    }
+
+    if (typoFindings.length > 0) {
+      const first = typoFindings[0];
+      return `Posible error: "${first.token}" -> "${first.suggestion}".`;
+    }
+
+    if (tokens.length === 1 && unknownWords.length > 0) {
+      return `Palabra no reconocida: "${unknownWords[0]}". Verifica ortografia.`;
+    }
+
+    return "";
+  }, [knownTokens]);
+
   const onSubmit = async (e) => {
     e.preventDefault();
-    if (!texto.trim()) {
-      alert("El texto del término es obligatorio.");
+    const issue = validateTexto(texto);
+    if (issue) {
+      setTextoIssue(issue);
+      alert(issue);
       return;
     }
     setSaving(true);
@@ -487,7 +635,15 @@ export default function RiesgoKeywords() {
               <textarea
                 rows={2}
                 value={texto}
-                onChange={(e) => setTexto(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setTexto(v);
+                  setTextoIssue(validateTexto(v));
+                }}
+                spellCheck
+                lang="es"
+                autoCorrect="on"
+                autoCapitalize="sentences"
                 style={{
                   width: "100%",
                   background: COLORS.bgInput,
@@ -499,6 +655,11 @@ export default function RiesgoKeywords() {
                   fontSize: 13,
                 }}
               />
+              {textoIssue && (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#f59e0b" }}>
+                  {textoIssue}
+                </div>
+              )}
             </div>
 
             <div style={{ marginBottom: 8 }}>
@@ -581,10 +742,10 @@ export default function RiesgoKeywords() {
             <button
               className="btn"
               type="submit"
-              disabled={saving}
+              disabled={saving || Boolean(textoIssue)}
               style={{
                 ...BTN.primary,
-                ...(saving ? BTN.disabled : {}),
+                ...(saving || textoIssue ? BTN.disabled : {}),
                 padding: "7px 14px",
                 borderRadius: 999,
                 fontSize: 13,
@@ -602,3 +763,4 @@ export default function RiesgoKeywords() {
     </div>
   );
 }
+

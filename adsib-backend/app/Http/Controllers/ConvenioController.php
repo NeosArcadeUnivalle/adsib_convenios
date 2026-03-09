@@ -486,6 +486,37 @@ class ConvenioController extends Controller
         return Storage::download($c->archivo_path, $nombre);
     }
 
+    public function verArchivo($id)
+    {
+        $c = Convenio::findOrFail($id);
+
+        if (!$c->archivo_path) {
+            return response()->json(['message' => 'No hay archivo'], 404);
+        }
+
+        $absPath = Storage::path($c->archivo_path);
+        $ext     = strtolower(pathinfo($absPath, PATHINFO_EXTENSION));
+
+        if ($ext === 'pdf') {
+            $nombre = $this->toUtf8($c->archivo_nombre_original ?: 'archivo.pdf');
+            return response()
+                ->file($absPath, [
+                    'Content-Type'        => 'application/pdf',
+                    'Content-Disposition' => 'inline; filename="' . addslashes($nombre) . '"',
+                ]);
+        }
+
+        if ($ext === 'docx') {
+            return response()->json([
+                'message' => 'Usa el visor externo para DOCX.',
+            ], 415);
+        }
+
+        return response()->json([
+            'message' => 'Formato no soportado para vista en línea.',
+        ], 415);
+    }
+
     public function eliminarArchivo($id)
     {
         $c = Convenio::findOrFail($id);
@@ -558,3 +589,5 @@ class ConvenioController extends Controller
         );
     }
 }
+
+

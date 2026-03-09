@@ -264,6 +264,46 @@ export default function ConvenioDetalle() {
     }
   };
 
+  const verDocumentoBase = async () => {
+    if (!c?.archivo_path) return;
+    const name = (c?.archivo_nombre_original || c?.archivo_path || "").toLowerCase();
+    const isDocx = name.endsWith(".docx");
+    try {
+      if (isDocx) {
+        nav(`/convenios/${id}/documento-base`);
+        return;
+      }
+
+      const res = await api.get(`/convenios/${id}/archivo/ver`, {
+        responseType: "blob",
+      });
+      const mime = res.headers["content-type"] || "application/octet-stream";
+      const url = URL.createObjectURL(new Blob([res.data], { type: mime }));
+      window.location.assign(url);
+    } catch (err) {
+      alert(err.response?.data?.message || "No se pudo abrir el documento.");
+    }
+  };
+
+  const descargarDocumentoBase = async () => {
+    try {
+      const res = await api.get(`/convenios/${id}/archivo/descargar`, {
+        responseType: "blob",
+      });
+      const name = filenameFromDisposition(res.headers["content-disposition"]);
+      const url = URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name || c?.archivo_nombre_original || "documento-base";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err.response?.data?.message || "No se pudo descargar.");
+    }
+  };
+
   const goPrev = () => {
     if (page > 1) loadPage(page - 1);
   };
@@ -317,6 +357,28 @@ export default function ConvenioDetalle() {
         >
           <div style={{ gridColumn: "1 / span 12" }}>
             <strong>Descripción:</strong> {c?.descripcion || "—"}
+          </div>
+          <div style={{ gridColumn: "1 / span 12" }}>
+            <strong>Documento base:</strong>{" "}
+            {c?.archivo_nombre_original || "No adjuntado"}
+            {c?.archivo_path && (
+              <span style={{ marginLeft: 10 }}>
+                <button
+                  className="btn"
+                  style={BTN.info}
+                  onClick={verDocumentoBase}
+                >
+                  Ver en línea
+                </button>{" "}
+                <button
+                  className="btn"
+                  style={BTN.dark}
+                  onClick={descargarDocumentoBase}
+                >
+                  Descargar
+                </button>
+              </span>
+            )}
           </div>
           <div style={{ gridColumn: "1 / span 4", minWidth: 220 }}>
             <strong>Estado:</strong> {c?.estado || "—"}
@@ -621,3 +683,4 @@ export default function ConvenioDetalle() {
     </div>
   );
 }
+

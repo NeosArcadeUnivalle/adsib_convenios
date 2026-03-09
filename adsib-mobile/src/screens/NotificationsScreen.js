@@ -110,22 +110,6 @@ export default function NotificationsScreen({ navigation }) {
         }}
       >
         <Pressable
-          onPress={() => navigation.goBack()}
-          style={({ pressed }) => ({
-            flexDirection: "row",
-            alignItems: "center",
-            paddingHorizontal: 10,
-            paddingVertical: 6,
-            borderRadius: 999,
-            borderWidth: 1,
-            borderColor: "#4b5563",
-            backgroundColor: pressed ? "#020617" : "transparent",
-          })}
-        >
-          <Text style={{ color: "#e5e7eb", fontSize: 14 }}>Regresar a Convenios</Text>
-        </Pressable>
-
-        <Pressable
           onPress={load}
           style={({ pressed }) => ({
             backgroundColor: "#1d4ed8",

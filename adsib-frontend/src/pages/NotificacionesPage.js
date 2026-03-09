@@ -30,15 +30,10 @@ const chip = (text, type = "neutral") => {
 /** Texto explicativo según los motivos y estado */
 const detalleAlto = (n) => {
   const m = n.motivos || [];
-  const venc = m.includes("vencimiento");
   const anal = m.includes("analisis");
-  if (venc && anal) {
-    return n.estado === "VENCIDO"
-      ? "Vencido y riesgo ALTO (último análisis)"
-      : "Vencimiento en ≤ 30 días y riesgo ALTO (último análisis)";
-  }
+  const estado = String(n.estado || "").toUpperCase();
   if (anal) return "Detectado por análisis de riesgo";
-  return n.estado === "VENCIDO" ? "Convenio vencido." : "Vencimiento en ≤ 30 días";
+  return estado === "VENCIDO" ? "Convenio vencido." : "Vencimiento en ≤ 30 días";
 };
 
 const detalleMedio = (n) => {

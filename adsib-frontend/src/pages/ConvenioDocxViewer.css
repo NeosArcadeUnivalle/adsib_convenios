@@ -1,0 +1,109 @@
+.docx-page {
+  min-height: 100vh;
+  padding: 14px;
+  background: #111827;
+  color: #e5e7eb;
+}
+
+.docx-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.docx-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.docx-back-btn {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #4b5563;
+  background: #374151;
+  color: #e5e7eb;
+  text-decoration: none;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.docx-title {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.docx-notice {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(234, 179, 8, 0.5);
+  background: rgba(234, 179, 8, 0.12);
+  border-radius: 10px;
+  color: #fef3c7;
+}
+
+.docx-status {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(17, 24, 39, 0.45);
+  border-radius: 10px;
+}
+
+.docx-status-error {
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #fecaca;
+}
+
+.docx-viewer-shell {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #f3f4f6;
+  max-height: calc(100vh - 118px);
+  scroll-snap-type: y mandatory;
+}
+
+.docx-viewer-content {
+  min-height: 560px;
+  padding: 8px 0 22px 0;
+  box-sizing: border-box;
+}
+
+.docx-viewer-shell .docx-wrapper {
+  background: #d1d5db !important;
+  padding: 0 0 10px 0 !important;
+  display: block !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+}
+
+.docx-viewer-shell section.docx {
+  box-sizing: border-box !important;
+  margin: 0 auto !important;
+  overflow: visible !important;
+}
+
+.docx-viewer-shell section.docx > article,
+.docx-viewer-shell section.docx > header,
+.docx-viewer-shell section.docx > footer {
+  box-sizing: border-box !important;
+  margin: 0 auto 18px 0 !important;
+  scroll-snap-align: start;
+  background: #fff;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.2);
+}
+
+.docx-viewer-shell section.docx > article {
+  min-height: 120px;
+}

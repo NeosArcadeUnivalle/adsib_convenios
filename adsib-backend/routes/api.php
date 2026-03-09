@@ -51,7 +51,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     /* Archivos base del convenio (v1) */
     Route::post  ('/convenios/{id}/archivo',           [ConvenioController::class, 'uploadArchivo']);
-    Route::get   ('/convenios/{id}/archivo/descargar', [ConvenioController::class, 'descargarArchivo']);
+Route::get   ('/convenios/{id}/archivo/descargar', [ConvenioController::class, 'descargarArchivo']);
+Route::get   ('/convenios/{id}/archivo/ver',       [ConvenioController::class, 'verArchivo']);
     Route::delete('/convenios/{id}/archivo',           [ConvenioController::class, 'eliminarArchivo']);
 
     /* Archivo FINAL */
@@ -74,6 +75,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get ('/analisis/{id}/pdf', [AnalisisController::class, 'pdf'])->whereNumber('id');
 
     /* Términos de riesgo (diccionario) */
+    Route::get   ('/riesgos/keywords/known-tokens', [RiesgoKeywordsController::class, 'knownTokens']);
     Route::get   ('/riesgos/keywords',        [RiesgoKeywordsController::class, 'index']);
     Route::post  ('/riesgos/keywords',        [RiesgoKeywordsController::class, 'store']);
     Route::put   ('/riesgos/keywords/{id}',   [RiesgoKeywordsController::class, 'update'])->whereNumber('id');

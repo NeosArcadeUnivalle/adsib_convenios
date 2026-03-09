@@ -25,6 +25,30 @@ const decodeHtmlEntities = (t = "") =>
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">");
 
+const stripControlChars = (s = "") =>
+  Array.from(s)
+    .filter((ch) => {
+      const c = ch.charCodeAt(0);
+      return !((c >= 0 && c <= 31) || (c >= 127 && c <= 159));
+    })
+    .join("");
+
+const isGibberishLine = (l = "") => {
+  const len = l.length || 1;
+  const letters = (l.match(/\p{L}/gu) || []).length;
+  const digits = (l.match(/\p{N}/gu) || []).length;
+  const symbols = (l.match(/[^\p{L}\p{N}\s]/gu) || []).length;
+  const words = l.trim().split(/\s+/).filter(Boolean);
+  const punctRunCount = (
+    l.match(/['"“”‘’`´\-_.:,;/\\]{2,}/g) || []
+  ).length;
+
+  if (symbols / len > 0.24) return true;
+  if (letters > 0 && digits / len > 0.35) return true;
+  if (words.length <= 2 && letters < 8 && punctRunCount > 0) return true;
+  return false;
+};
+
 // Detectar número de página a partir de una línea
 const pageFromLine = (line) => {
   const m = /(p[áa]gina|page)\s+(\d+)/i.exec(line || "");
@@ -50,8 +74,20 @@ const normalizeTextForDiff = (t = "") =>
     .replace(/\r\n/g, "\n")
     .split("\n")
     .map((line) => {
-      let l = line.replace(/\s+/g, " ").trim();
+      let l = (line || "").normalize("NFKC");
+      l = stripControlChars(l);
+      l = l
+        .replace(/\uFEFF/g, " ")
+        .replace(/[^\p{L}\p{N}\s.,;:!?()\-/%"'“”‘’«»]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
       if (!l) return "";
+
+      // correcciones OCR comunes dentro de palabras
+      l = l
+        .replace(/(?<=\p{L})0(?=\p{L})/gu, "o")
+        .replace(/(?<=\p{L})1(?=\p{L})/gu, "l")
+        .replace(/(?<=\p{L})5(?=\p{L})/gu, "s");
 
       // quitar prefijos numéricos/códigos (>=8 chars de dígitos/separadores)
       l = l.replace(/^[0-9\-.,/]{8,}\s*/u, "").trim();
@@ -64,13 +100,10 @@ const normalizeTextForDiff = (t = "") =>
       const noSpaces = l.replace(/\s+/g, "");
       if (/^['"“”‘’«»`´]+$/u.test(noSpaces)) return false;
 
-      const len = l.length;
-      if (!len) return false;
-
-      const letters = (l.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g) || []).length;
-
-      // si no hay letras o son menos del 25% => basura numérica/códigos
-      if (!letters || letters / len < 0.25) return false;
+      if (!/[0-9\p{L}]/u.test(l)) return false;
+      const alnum = (l.match(/[\p{L}\p{N}]/gu) || []).length;
+      if (alnum / Math.max(1, l.length) < 0.45) return false;
+      if (isGibberishLine(l)) return false;
 
       return true;
     })
@@ -79,7 +112,11 @@ const normalizeTextForDiff = (t = "") =>
 /** Diff a NIVEL DE LÍNEA */
 function buildLineDiff(aText = "", bText = "") {
   const dmp = new DiffMatchPatch();
-  const diffs = dmp.diff_main(aText, bText);
+  const aNL = aText.replace(/\r\n/g, "\n");
+  const bNL = bText.replace(/\r\n/g, "\n");
+  const lineMode = dmp.diff_linesToChars_(aNL, bNL);
+  const diffs = dmp.diff_main(lineMode.chars1, lineMode.chars2, false);
+  dmp.diff_charsToLines_(diffs, lineMode.lineArray);
   dmp.diff_cleanupSemantic(diffs);
 
   const rows = [];
@@ -167,15 +204,15 @@ export default function ConvenioComparar() {
 
   // búsqueda
   const [q, setQ] = useState("");
+  const qNorm = q.trim().toLowerCase();
   const matches = useMemo(() => {
-    if (!q) return [];
+    if (!qNorm) return [];
     const idxs = [];
     rows.forEach((r, i) => {
-      if (r.text && r.text.toLowerCase().includes(q.toLowerCase()))
-        idxs.push(i);
+      if (r.text && r.text.toLowerCase().includes(qNorm)) idxs.push(i);
     });
     return idxs;
-  }, [q, rows]);
+  }, [qNorm, rows]);
   const [cur, setCur] = useState(0);
   const containerRef = useRef(null);
 
@@ -212,8 +249,7 @@ export default function ConvenioComparar() {
     }
   };
 
-  const comparar = async (e) => {
-    e?.preventDefault();
+  const runCompare = async () => {
     if (!selA || !selB || selA === selB) {
       alert("Selecciona dos versiones distintas");
       return;
@@ -244,7 +280,18 @@ export default function ConvenioComparar() {
 
   useEffect(() => {
     setCur(0);
-  }, [q]);
+  }, [qNorm, rows]);
+
+  useEffect(() => {
+    // no auto-compare: al cambiar versiones se limpia resultado
+    setRows([]);
+    setCur(0);
+  }, [selA, selB]);
+
+  const comparar = async (e) => {
+    e?.preventDefault();
+    await runCompare();
+  };
 
   const gotoMatch = (dir) => {
     if (!matches.length) return;
@@ -345,7 +392,7 @@ export default function ConvenioComparar() {
               disabled={!matches.length}
               onClick={() => gotoMatch("prev")}
             >
-              ◀
+              ?
             </button>
             <button
               type="button"
@@ -354,7 +401,7 @@ export default function ConvenioComparar() {
               disabled={!matches.length}
               onClick={() => gotoMatch("next")}
             >
-              ▶
+              ?
             </button>
             <span style={{ fontSize: 12, opacity: 0.8 }}>
               {matches.length ? `${cur + 1}/${matches.length}` : "0 resultados"}
@@ -397,6 +444,18 @@ export default function ConvenioComparar() {
 
       {/* Resultado */}
       <div className="card" style={{ marginTop: 10 }}>
+        <div
+          style={{
+            padding: "6px 10px",
+            fontSize: 12,
+            opacity: 0.9,
+            borderBottom: "1px solid rgba(255,255,255,.08)",
+          }}
+        >
+          {rows.length} filas · {rows.filter((r) => r.op === -1).length} eliminadas
+          · {rows.filter((r) => r.op === 1).length} agregadas ·{" "}
+          {rows.filter((r) => r.op === 0).length} sin cambios
+        </div>
         <div ref={containerRef} style={{ maxHeight: 480, overflow: "auto" }}>
           <table
             className="table"
@@ -421,10 +480,12 @@ export default function ConvenioComparar() {
               {rows.map((r, i) => {
                 const isAdd = r.op === 1;
                 const isDel = r.op === -1;
+                const isCurrentMatch =
+                  matches.length > 0 && matches[cur] === i;
                 let text = escapeHtml(r.text || "");
-                if (q) {
+                if (qNorm) {
                   const re = new RegExp(
-                    `(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
+                    `(${qNorm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
                     "gi"
                   );
                   text = text.replace(
@@ -443,6 +504,9 @@ export default function ConvenioComparar() {
                         ? "#7f1d1d"
                         : "transparent",
                       color: isAdd || isDel ? "#fff" : "inherit",
+                      boxShadow: isCurrentMatch
+                        ? "inset 0 0 0 2px #f59e0b"
+                        : "none",
                       borderTop: "1px solid rgba(255,255,255,.08)",
                     }}
                   >
@@ -468,3 +532,4 @@ export default function ConvenioComparar() {
     </div>
   );
 }
+

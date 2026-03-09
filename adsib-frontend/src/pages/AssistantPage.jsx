@@ -24,6 +24,50 @@ const Avatar = ({ role }) => (
   </div>
 );
 
+const renderInlineBold = (line) => {
+  const parts = String(line ?? "").split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, idx) => {
+    if (/^\*\*[^*]+\*\*$/.test(part)) {
+      return (
+        <strong key={`b-${idx}`} style={{ color: "#fff", fontWeight: 800 }}>
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    return <React.Fragment key={`t-${idx}`}>{part}</React.Fragment>;
+  });
+};
+
+const formatAssistantText = (text) => {
+  let t = String(text ?? "").replace(/\r\n?/g, "\n").trim();
+
+  // Si llega un bloque muy largo en una sola linea, lo partimos por puntuacion.
+  if (!t.includes("\n") && t.length > 220) {
+    t = t.replace(/([.;:])\s+/g, "$1\n");
+  }
+
+  const lines = t.split("\n");
+  return lines.map((line, idx) => {
+    const clean = line.trim();
+    if (!clean) return <div key={`sp-${idx}`} style={{ height: 8 }} />;
+    const isBullet = /^([-*]|\d+\.)\s+/.test(clean);
+
+    return (
+      <div
+        key={`ln-${idx}`}
+        style={{
+          marginBottom: isBullet ? 6 : 8,
+          paddingLeft: isBullet ? 2 : 0,
+          lineHeight: 1.6,
+          wordBreak: "break-word",
+        }}
+      >
+        {renderInlineBold(clean)}
+      </div>
+    );
+  });
+};
+
 const Bubble = ({ role, text }) => {
   const isUser = role === "user";
   return (
@@ -49,7 +93,7 @@ const Bubble = ({ role, text }) => {
             "0 4px 16px rgba(0,0,0,.25), inset 0 0 0 1px rgba(255,255,255,.07)",
         }}
       >
-        {text}
+        {isUser ? text : formatAssistantText(text)}
       </div>
       {isUser && <Avatar role={role} />}
     </div>
@@ -121,6 +165,9 @@ export default function AssistantPage() {
     const msg = (text ?? input).trim();
     if (!msg || busy) return;
 
+    const history = [...messages, { role: "user", text: msg }]
+      .slice(-12)
+      .map((m) => ({ role: m.role, text: String(m.text || "") }));
     setMessages((m) => [...m, { role: "user", text: msg }]);
     setInput("");
     setBusy(true);
@@ -128,7 +175,7 @@ export default function AssistantPage() {
     try {
       const { data } = await api.post(
         "/assistant/chat", // baseURL del axios "api" debería ser "/api"
-        { message: msg, context: {} },
+        { message: msg, context: { history } },
         {
           timeout: 120000,
           headers: {
